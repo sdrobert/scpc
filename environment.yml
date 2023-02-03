@@ -1,0 +1,22 @@
+name: scpc
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - sdrobert
+  - defaults
+dependencies:
+  - jiwer
+  - nltk=3.5
+  - pip
+  - pydrobert-param>=0.4.0
+  - pydrobert-speech
+  - pysoundfile
+  - python
+  - pytorch-lightning>=1.7
+  - pytorch::pytorch-cuda
+  - requests
+  - ruamel.yaml
+  - sentencepiece=0.1.95
+  - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
+    - "git+https://github.com/sdrobert/pydrobert-pytorch.git@74a761a"
