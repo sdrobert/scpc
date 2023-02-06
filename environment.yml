@@ -9,6 +9,7 @@ dependencies:
   - jiwer
   - nltk=3.5
   - pip
+  - pydrobert-kaldi
   - pydrobert-param>=0.4.0
   - pydrobert-speech
   - pysoundfile
@@ -19,4 +20,4 @@ dependencies:
   - ruamel.yaml
   - sentencepiece=0.1.95
   - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
-    - "git+https://github.com/sdrobert/pydrobert-pytorch.git@74a761a"
+    - "git+https://github.com/sdrobert/pydrobert-pytorch.git"
