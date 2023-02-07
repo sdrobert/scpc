@@ -19,7 +19,6 @@ import abc
 from typing import Optional, Tuple, Type
 
 import torch
-import pydrobert.torch.modules as my_mods
 
 try:
     import pytest
@@ -253,27 +252,64 @@ class TransformerEncoder(Encoder):
     def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
         N, T = x.shape[:2]
         out_shape = (self.num_heads * N, T, T)
-        if lens is None:
-            len_mask = x.new_zeros(out_shape)
-        else:
-            len_mask = x.new_full(out_shape, -float("inf"))
-            len_mask = len_mask.masked_fill_(
-                get_length_mask(len_mask, lens.repeat_interleave(self.num_heads)), 0
-            )
+        len_mask = x.new_ones(out_shape, dtype=torch.bool)
+        if lens is not None:
+            len_mask = get_length_mask(len_mask, lens.repeat_interleave(self.num_heads))
         return len_mask
 
     def encode(
         self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        mask = self.get_mask(x, lens)
+        mask = ~self.get_mask(x, lens)
         x = self.encoder(x, mask)
         return x, lens
 
 
+class CausalTransformerEncoder(TransformerEncoder):
+
+    __slots__ = ["in_channels", "hidden_size", "num_heads", "max_width"]
+    max_width: Optional[int]
+
+    def __init__(
+        self,
+        in_channels: int,
+        max_width: Optional[int] = None,
+        num_layers: int = 1,
+        num_heads: int = 8,
+        dim_feedforward: int = 2048,
+        layer_norm_eps: float = 0.00001,
+        enable_nested_tensor: bool = False,
+    ) -> None:
+        if max_width is not None:
+            check_positive("max_width", max_width)
+        super().__init__(
+            in_channels,
+            num_layers,
+            num_heads,
+            dim_feedforward,
+            layer_norm_eps,
+            enable_nested_tensor,
+        )
+        self.max_width = max_width
+
+    def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
+        len_mask = super().get_mask(x, lens)
+        T = len_mask.size(-1)
+        causal_mask = len_mask.new_ones(T, T).tril_()
+        if self.max_width is not None:
+            causal_mask = causal_mask.triu_(-self.max_width + 1)
+        return len_mask & causal_mask
+
+
 @_parametrize(
     "Encoder",
-    [IdentityEncoder, ConvEncoder, TransformerEncoder],
-    ids=["IdentityEncoder", "ConvEncoder", "TransformerEncoder"],
+    [IdentityEncoder, ConvEncoder, TransformerEncoder, CausalTransformerEncoder],
+    ids=[
+        "IdentityEncoder",
+        "ConvEncoder",
+        "TransformerEncoder",
+        "CausalTransformerEncoder",
+    ],
 )
 def test_encoder_variable_batches(Encoder: Type[Encoder]):
     torch.manual_seed(0)
@@ -286,7 +322,7 @@ def test_encoder_variable_batches(Encoder: Type[Encoder]):
         lens_n = torch.randint(Tmin, Tmax + 1, (1,))
         x_n = torch.rand(1, lens_n.item(), H)
         x_exp_n, lens__n = encoder(x_n)
-        assert not (x_exp_n == 0).all()
+        assert not (x_exp_n == 0).all()  # check we're not just padding nothing
         assert lens__n is None
         x.append(x_n.flatten())
         lens.append(lens_n)
@@ -299,3 +335,20 @@ def test_encoder_variable_batches(Encoder: Type[Encoder]):
         assert lens_act_n == x_exp_n.size(0), n
         assert (x_act_n[lens_act_n:] == 0).all(), n
         assert torch.allclose(x_exp_n, x_act_n[:lens_act_n], atol=1e-5), n
+
+
+def test_causal_transformer_encoder_is_causal():
+    torch.manual_seed(1)
+    N, T, H = 3, 13, 17
+    x = torch.rand(N, T, H)
+    encoder = CausalTransformerEncoder(H, T // 2 - 1, num_heads=1)
+    encoder.eval()
+    x1 = encoder(x)[0][:, : T // 2]
+    x2 = encoder(x[:, : T // 2])[0]
+    assert x1.shape == x2.shape
+    assert torch.allclose(x1, x2, atol=1e-5)
+    x1 = x1[:, -2:]
+    x2 = encoder(x[:, 1 : T // 2])[0][:, -2:]
+    assert not torch.allclose(x1[:, 0], x2[:, 0], atol=1e-5)
+    assert torch.allclose(x1[:, 1], x2[:, 1], atol=1e-5)
+
