@@ -362,6 +362,103 @@ class RecurrentEncoder(Encoder):
         return x, lens
 
 
+class CPCLossNetwork(torch.nn.Module):
+
+    __slots__ = ["negative_samples", "prediction_steps"]
+
+    negative_samples: int
+    prediction_steps: int
+
+    def __init__(
+        self,
+        latent_size: int,
+        context_size: Optional[int] = None,
+        prediction_steps: int = 12,
+        negative_samples: int = 128,
+        num_sources: Optional[int] = None,
+        dropout_prob: float = 0.1,
+    ) -> None:
+        check_positive("latent_size", latent_size)
+        if context_size is None:
+            context_size = latent_size
+        else:
+            check_positive("context_size", context_size)
+        check_positive("prediction_steps", prediction_steps)
+        check_positive("negative_samples", negative_samples)
+        if num_sources is not None:
+            check_positive("num_sources", num_sources)
+        check_positive("dropout_prob", dropout_prob)
+        super().__init__()
+        self.negative_samples = negative_samples
+        self.prediction_steps = prediction_steps
+
+        if num_sources is not None:
+            self.embed = torch.nn.Embedding(num_sources, context_size)
+        else:
+            self.register_module("embed", None)
+
+        self.ff = torch.nn.Linear(context_size, prediction_steps * latent_size, False)
+
+        self.drop = torch.nn.Dropout(dropout_prob)
+
+        self.unfold = torch.nn.Unfold((prediction_steps, latent_size))
+
+    def forward(
+        self,
+        latent: torch.Tensor,
+        context: Optional[torch.Tensor] = None,
+        lens: Optional[torch.Tensor] = None,
+        sources: Optional[torch.Tensor] = None,
+    ):
+        if context is None:
+            context = latent
+
+        N, T, C = latent.shape
+        assert N > 0 and T > 0
+        assert context.shape[:2] == (N, T)
+        K, M = self.prediction_steps, self.negative_samples
+        Tp = T - self.prediction_steps
+        assert Tp > 0, "prediction window too large for sequences"
+
+        if self.embed is not None:
+            context = context + self.embed(sources).unsqueeze(1)
+
+        Az = self.drop(self.ff(context[:, :Tp])).view(N, Tp, K, C)
+
+        if lens is None:
+            phi_n = latent.flatten(end_dim=1)
+            norm = latent.new_ones(1)
+        else:
+            norm = (lens - K).clamp_min_(0).sum() * K
+            assert norm > 0, "prediction window too large"
+            mask = get_length_mask(latent, lens, seq_dim=1)
+            phi_n = latent[mask].view(-1, latent.size(2))
+        samps = torch.randint(phi_n.size(0), (N * Tp * M,), device=latent.device)
+        phi_n = phi_n[samps].view(N, M, Tp, 1, C)
+        denom = (Az.unsqueeze(1) * phi_n).sum(4)
+        denom = denom.logsumexp(1)  # (N, Tp, K)
+        del phi_n
+
+        phi_k = (
+            self.unfold(latent[:, 1:].unsqueeze(1)).transpose(1, 2).view(N, Tp, K, C)
+        )
+        num = (Az * self.drop(phi_k)).sum(3)  # (N, Tp, K)
+        del phi_k
+
+        assert denom.shape == num.shape
+        loss = denom - num  # neg num - denom
+        if lens is None:
+            loss = loss.mean()
+        else:
+            mask = get_length_mask(loss, lens - K, seq_dim=1)
+            loss = loss.masked_fill(~mask, 0.0).sum()
+            loss = loss / norm
+        return loss
+
+
+## TESTS
+
+
 @_parametrize(
     "Encoder",
     [
@@ -420,4 +517,52 @@ def test_causal_transformer_encoder_is_causal():
     x2 = encoder(x[:, 1 : T // 2])[0][:, -2:]
     assert not torch.allclose(x1[:, 0], x2[:, 0], atol=1e-5)
     assert torch.allclose(x1[:, 1], x2[:, 1], atol=1e-5)
+
+
+@_parametrize("embedding", [True, False], ids=["w/-embedding", "w/o-embedding"])
+def test_cpc_prediction_network_matches_manual_comp(embedding):
+    torch.manual_seed(2)
+    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 1000
+    lens = torch.randint(K + 1, T + 1, (N,))
+    lens[0] = T
+    sum_lens = lens.sum().item()
+    latent, context = torch.randn(sum_lens, Cl), torch.randn(N, T, Cc)
+    samp = torch.randint(sum_lens, (N * (T - 1) * M,))
+    latent_samp = latent[samp].view(N, T - 1, M, Cl)
+    sources = torch.randint(N, (N,))
+
+    net = CPCLossNetwork(Cl, Cc, K, M, N if embedding else None)
+    net.eval()
+
+    loss_exp, latents_ = 0.0, []
+    norm = 0
+    for n in range(N):
+        lens_n = lens[n]
+        latent_n, latent = latent[:lens_n], latent[lens_n:]
+        latents_.append(latent_n)
+        assert latent_n.size(0) == lens_n
+        context_n = context[n, :lens_n]
+        if embedding:
+            context_n = context_n + net.embed(sources[n : n + 1])
+        latent_samp_n = latent_samp[n]
+        Az_n = net.ff(context_n)
+        assert Az_n.shape == (lens_n, Cl * K)
+        Az_n = Az_n.view(lens_n, K, Cl).transpose(0, 1)
+        for k in range(1, K + 1):
+            Az_n_k = Az_n[k - 1]  # (lens_n - 1, Cl)
+            for t in range(lens_n - k - 1):
+                Az_n_k_t = Az_n_k[t]  # (Cl,)
+                latent_n_tpk = latent_n[t + k]  # (Cl,)
+                num = Az_n_k_t @ latent_n_tpk
+                assert num.numel() == 1
+                latent_samp_n_t = latent_samp_n[t]  # (M, Cl)
+                denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0)
+                assert denom.numel() == 1
+                loss_exp = loss_exp - (num - denom)
+                norm += 1
+    loss_exp = loss_exp / norm
+
+    latents = torch.nn.utils.rnn.pad_sequence(latents_, True, -1)
+    loss_act = net(latents, context, lens, sources)
+    assert torch.isclose(loss_exp, loss_act, atol=1e-1)
 
