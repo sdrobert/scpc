@@ -16,7 +16,7 @@
 # limitations under the License.
 
 import abc
-from typing import Optional, Tuple, Type
+from typing import Collection, Literal, Optional, Tuple, Type
 
 import torch
 
@@ -46,6 +46,12 @@ def check_positive(name: str, val, nonnegative=False):
     pos = "non-negative" if nonnegative else "positive"
     if val < 0 or (val == 0 and not nonnegative):
         raise ValueError(f"Expected {name} to be {pos}; got {val}")
+
+
+def check_in(name: str, val: str, choices: Collection[str]):
+    if val not in choices:
+        choices = "', '".join(sorted(choices))
+        raise ValueError(f"Expected {name} to be one of '{choices}'; got '{val}'")
 
 
 class MaskingLayer(torch.nn.Module):
@@ -312,14 +318,65 @@ class CausalTransformerEncoder(TransformerEncoder):
         return len_mask & causal_mask
 
 
+class RecurrentEncoder(Encoder):
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_size: int = 256,
+        num_layers: int = 1,
+        recurrent_type: Literal["gru", "lstm", "rnn"] = "gru",
+        dropout_prob: float = 0.1,
+    ) -> None:
+        check_positive("num_layers", num_layers)
+        check_in("recurrent_type", recurrent_type, {"gru", "lstm", "rnn"})
+        check_positive("dropout_prob", dropout_prob)
+        super().__init__(in_channels, hidden_size)
+        if recurrent_type == "gru":
+            RNN = torch.nn.GRU
+        elif recurrent_type == "lstm":
+            RNN = torch.nn.LSTM
+        else:
+            RNN = torch.nn.RNN
+        self.rnn = RNN(
+            in_channels,
+            hidden_size,
+            num_layers,
+            batch_first=True,
+            dropout=0.0 if num_layers == 1 else dropout_prob,
+        )
+        self.drop = torch.nn.Dropout(dropout_prob)
+
+    def downsampling_factor(self) -> int:
+        return 1
+
+    def encode(
+        self, x: torch.Tensor, lens: Optional[torch.Tensor]
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        T = x.size(1)
+        if lens is not None:
+            x = torch.nn.utils.rnn.pack_padded_sequence(x, lens, True, False)
+        x = self.rnn(x)[0]
+        if lens is not None:
+            x = torch.nn.utils.rnn.pad_packed_sequence(x, True, 0, T)[0]
+        x = self.drop(x)
+        return x, lens
+
+
 @_parametrize(
     "Encoder",
-    [IdentityEncoder, ConvEncoder, TransformerEncoder, CausalTransformerEncoder],
+    [
+        IdentityEncoder,
+        ConvEncoder,
+        TransformerEncoder,
+        CausalTransformerEncoder,
+        RecurrentEncoder,
+    ],
     ids=[
         "IdentityEncoder",
         "ConvEncoder",
         "TransformerEncoder",
         "CausalTransformerEncoder",
+        "RecurrentEncoder",
     ],
 )
 def test_encoder_variable_batches(Encoder: Type[Encoder]):
@@ -333,6 +390,7 @@ def test_encoder_variable_batches(Encoder: Type[Encoder]):
         lens_n = torch.randint(Tmin, Tmax + 1, (1,))
         x_n = torch.rand(1, lens_n.item(), H)
         x_exp_n, lens__n = encoder(x_n)
+        assert x_exp_n.size(-1) == encoder.hidden_size
         assert not (x_exp_n == 0).all()  # check we're not just padding nothing
         assert lens__n is None
         x.append(x_n.flatten())
