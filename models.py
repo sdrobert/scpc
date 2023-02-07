@@ -423,7 +423,7 @@ class CPCLossNetwork(torch.nn.Module):
         if self.embed is not None:
             context = context + self.embed(sources).unsqueeze(1)
 
-        Az = self.drop(self.ff(context[:, :Tp])).view(N, Tp, K, C)
+        Az = self.drop(self.ff(context[:, :Tp])).view(N * Tp * K, C, 1)
 
         if lens is None:
             phi_n = latent.flatten(end_dim=1)
@@ -434,18 +434,16 @@ class CPCLossNetwork(torch.nn.Module):
             mask = get_length_mask(latent, lens, seq_dim=1)
             phi_n = latent[mask].view(-1, latent.size(2))
         samps = torch.randint(phi_n.size(0), (N * Tp * M,), device=latent.device)
-        phi_n = phi_n[samps].view(N, M, Tp, 1, C)
-        denom = (Az.unsqueeze(1) * phi_n).sum(4)
-        denom = denom.logsumexp(1)  # (N, Tp, K)
+        phi_n = phi_n[samps].view(N * Tp, 1, M, C).expand(N * Tp, K, M, C).flatten(0, 1)
+        denom = torch.bmm(phi_n, Az).squeeze(2)
+        denom = denom.logsumexp(1).view(N, Tp, K)
         del phi_n
 
-        phi_k = (
-            self.unfold(latent[:, 1:].unsqueeze(1)).transpose(1, 2).view(N, Tp, K, C)
-        )
-        num = (Az * self.drop(phi_k)).sum(3)  # (N, Tp, K)
+        phi_k = self.unfold(latent[:, 1:].unsqueeze(1))  # (N, K * C, Tp)
+        phi_k = phi_k.transpose(1, 2).reshape(N * Tp * K, 1, C)
+        num = torch.bmm(phi_k, Az).view(N, Tp, K)
         del phi_k
 
-        assert denom.shape == num.shape
         loss = denom - num  # neg num - denom
         if lens is None:
             loss = loss.mean()
