@@ -166,8 +166,13 @@ class IdentityEncoder(Encoder):
 
 
 class ConvEncoder(Encoder):
-    def __init__(self, in_channels: int, hidden_size: int = 256) -> None:
+    def __init__(
+        self, in_channels: int, hidden_size: int = 256, dropout_prob: float = 0.1
+    ) -> None:
+        check_positive("dropout_prob", dropout_prob)
         super().__init__(in_channels, hidden_size)
+        self.drop = torch.nn.Dropout(dropout_prob)
+        self.relu = torch.nn.ReLU()
         self.mask0 = MaskingLayer(1, 1, 0)
         self.conv1 = torch.nn.Conv1d(in_channels, hidden_size, 10, 5, 3)
         self.norm1 = ChannelNorm(hidden_size)
@@ -204,11 +209,11 @@ class ConvEncoder(Encoder):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         x = x.transpose(1, 2)  # N, C, T
         x, lens = self.mask0(x, lens)
-        x, lens = self.mask1(torch.nn.functional.relu(self.norm1(self.conv1(x))), lens)
-        x, lens = self.mask2(torch.nn.functional.relu(self.norm2(self.conv2(x))), lens)
-        x, lens = self.mask3(torch.nn.functional.relu(self.norm3(self.conv3(x))), lens)
-        x, lens = self.mask3(torch.nn.functional.relu(self.norm4(self.conv4(x))), lens)
-        x, lens = self.mask3(torch.nn.functional.relu(self.norm5(self.conv5(x))), lens)
+        x, lens = self.mask1(self.relu(self.norm1(self.conv1(self.drop(x)))), lens)
+        x, lens = self.mask2(self.relu(self.norm2(self.conv2(self.drop(x)))), lens)
+        x, lens = self.mask3(self.relu(self.norm3(self.conv3(self.drop(x)))), lens)
+        x, lens = self.mask3(self.relu(self.norm4(self.conv4(self.drop(x)))), lens)
+        x, lens = self.mask3(self.relu(self.norm5(self.conv5(self.drop(x)))), lens)
         x = x.transpose(1, 2)  # N, T, C
         return x, lens
 
@@ -225,20 +230,24 @@ class TransformerEncoder(Encoder):
         num_heads: int = 8,
         dim_feedforward: int = 2048,
         layer_norm_eps: float = 1e-5,
+        dropout_prob: float = 0.1,
         enable_nested_tensor: bool = False,
     ) -> None:
         check_positive("num_layers", num_layers)
         check_positive("num_heads", num_heads)
         check_positive("dim_feedforward", dim_feedforward)
         check_positive("layer_norm_eps", layer_norm_eps)
+        check_positive("dropout_prob", dropout_prob)
         super().__init__(in_channels)
         self.num_heads = num_heads
         encoder_layer = torch.nn.TransformerEncoderLayer(
             in_channels,
             num_heads,
             dim_feedforward,
-            layer_norm_eps=layer_norm_eps,
-            batch_first=True,
+            dropout_prob,
+            "relu",
+            layer_norm_eps,
+            True,
         )
         layer_norm = torch.nn.LayerNorm(in_channels, layer_norm_eps)
         self.encoder = torch.nn.TransformerEncoder(
@@ -277,7 +286,8 @@ class CausalTransformerEncoder(TransformerEncoder):
         num_layers: int = 1,
         num_heads: int = 8,
         dim_feedforward: int = 2048,
-        layer_norm_eps: float = 0.00001,
+        layer_norm_eps: float = 1e-5,
+        dropout_prob: float = 0.1,
         enable_nested_tensor: bool = False,
     ) -> None:
         if max_width is not None:
@@ -288,6 +298,7 @@ class CausalTransformerEncoder(TransformerEncoder):
             num_heads,
             dim_feedforward,
             layer_norm_eps,
+            dropout_prob,
             enable_nested_tensor,
         )
         self.max_width = max_width
