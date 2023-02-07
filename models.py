@@ -128,18 +128,18 @@ class ChannelNorm(torch.nn.Module):
 
 class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
 
-    __slots__ = ["in_channels", "hidden_size"]
-    in_channels: int
-    hidden_size: int
+    __slots__ = ["input_size", "output_size"]
+    input_size: int
+    output_size: int
 
-    def __init__(self, in_channels: int, hidden_size: Optional[int] = None) -> None:
-        check_positive("in_channels", in_channels)
-        if hidden_size is None:
-            hidden_size = in_channels
+    def __init__(self, input_size: int, output_size: Optional[int] = None) -> None:
+        check_positive("input_size", input_size)
+        if output_size is None:
+            output_size = input_size
         else:
-            check_positive("hidden_size", hidden_size)
+            check_positive("output_size", output_size)
         super().__init__()
-        self.in_channels, self.hidden_size = in_channels, hidden_size
+        self.input_size, self.output_size = input_size, output_size
 
     @abc.abstractproperty
     def downsampling_factor(self) -> int:
@@ -173,26 +173,26 @@ class IdentityEncoder(Encoder):
 
 class ConvEncoder(Encoder):
     def __init__(
-        self, in_channels: int, hidden_size: int = 256, dropout_prob: float = 0.1
+        self, input_size: int, output_size: int = 256, dropout_prob: float = 0.1
     ) -> None:
         check_positive("dropout_prob", dropout_prob)
-        super().__init__(in_channels, hidden_size)
+        super().__init__(input_size, output_size)
         self.drop = torch.nn.Dropout(dropout_prob)
         self.relu = torch.nn.ReLU()
         self.mask0 = MaskingLayer(1, 1, 0)
-        self.conv1 = torch.nn.Conv1d(in_channels, hidden_size, 10, 5, 3)
-        self.norm1 = ChannelNorm(hidden_size)
+        self.conv1 = torch.nn.Conv1d(input_size, output_size, 10, 5, 3)
+        self.norm1 = ChannelNorm(output_size)
         self.mask1 = MaskingLayer(10, 5, 3)
-        self.conv2 = torch.nn.Conv1d(hidden_size, hidden_size, 8, 4, 2)
-        self.norm2 = ChannelNorm(hidden_size)
+        self.conv2 = torch.nn.Conv1d(output_size, output_size, 8, 4, 2)
+        self.norm2 = ChannelNorm(output_size)
         self.mask2 = MaskingLayer(8, 4, 2)
-        self.conv3 = torch.nn.Conv1d(hidden_size, hidden_size, 4, 2, 1)
-        self.norm3 = ChannelNorm(hidden_size)
+        self.conv3 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
+        self.norm3 = ChannelNorm(output_size)
         self.mask3 = MaskingLayer(4, 2, 1)
-        self.conv4 = torch.nn.Conv1d(hidden_size, hidden_size, 4, 2, 1)
-        self.norm4 = ChannelNorm(hidden_size)
-        self.conv5 = torch.nn.Conv1d(hidden_size, hidden_size, 4, 2, 1)
-        self.norm5 = ChannelNorm(hidden_size)
+        self.conv4 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
+        self.norm4 = ChannelNorm(output_size)
+        self.conv5 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
+        self.norm5 = ChannelNorm(output_size)
 
     def reset_parameters(self) -> None:
         self.conv1.reset_parameters()
@@ -226,12 +226,12 @@ class ConvEncoder(Encoder):
 
 class TransformerEncoder(Encoder):
 
-    __slots__ = ["in_channels", "hidden_size", "num_heads"]
+    __slots__ = ["input_size", "output_size", "num_heads"]
     num_heads: int
 
     def __init__(
         self,
-        in_channels: int,
+        input_size: int,
         num_layers: int = 1,
         num_heads: int = 8,
         dim_feedforward: int = 2048,
@@ -244,10 +244,10 @@ class TransformerEncoder(Encoder):
         check_positive("dim_feedforward", dim_feedforward)
         check_positive("layer_norm_eps", layer_norm_eps)
         check_positive("dropout_prob", dropout_prob)
-        super().__init__(in_channels)
+        super().__init__(input_size)
         self.num_heads = num_heads
         encoder_layer = torch.nn.TransformerEncoderLayer(
-            in_channels,
+            input_size,
             num_heads,
             dim_feedforward,
             dropout_prob,
@@ -255,7 +255,7 @@ class TransformerEncoder(Encoder):
             layer_norm_eps,
             True,
         )
-        layer_norm = torch.nn.LayerNorm(in_channels, layer_norm_eps)
+        layer_norm = torch.nn.LayerNorm(input_size, layer_norm_eps)
         self.encoder = torch.nn.TransformerEncoder(
             encoder_layer, num_layers, layer_norm, enable_nested_tensor
         )
@@ -282,12 +282,12 @@ class TransformerEncoder(Encoder):
 
 class CausalTransformerEncoder(TransformerEncoder):
 
-    __slots__ = ["in_channels", "hidden_size", "num_heads", "max_width"]
+    __slots__ = ["input_size", "output_size", "num_heads", "max_width"]
     max_width: Optional[int]
 
     def __init__(
         self,
-        in_channels: int,
+        input_size: int,
         max_width: Optional[int] = None,
         num_layers: int = 1,
         num_heads: int = 8,
@@ -299,7 +299,7 @@ class CausalTransformerEncoder(TransformerEncoder):
         if max_width is not None:
             check_positive("max_width", max_width)
         super().__init__(
-            in_channels,
+            input_size,
             num_layers,
             num_heads,
             dim_feedforward,
@@ -321,8 +321,8 @@ class CausalTransformerEncoder(TransformerEncoder):
 class RecurrentEncoder(Encoder):
     def __init__(
         self,
-        in_channels: int,
-        hidden_size: int = 256,
+        input_size: int,
+        output_size: int = 256,
         num_layers: int = 1,
         recurrent_type: Literal["gru", "lstm", "rnn"] = "gru",
         dropout_prob: float = 0.1,
@@ -330,7 +330,7 @@ class RecurrentEncoder(Encoder):
         check_positive("num_layers", num_layers)
         check_in("recurrent_type", recurrent_type, {"gru", "lstm", "rnn"})
         check_positive("dropout_prob", dropout_prob)
-        super().__init__(in_channels, hidden_size)
+        super().__init__(input_size, output_size)
         if recurrent_type == "gru":
             RNN = torch.nn.GRU
         elif recurrent_type == "lstm":
@@ -338,8 +338,8 @@ class RecurrentEncoder(Encoder):
         else:
             RNN = torch.nn.RNN
         self.rnn = RNN(
-            in_channels,
-            hidden_size,
+            input_size,
+            output_size,
             num_layers,
             batch_first=True,
             dropout=0.0 if num_layers == 1 else dropout_prob,
@@ -390,7 +390,7 @@ def test_encoder_variable_batches(Encoder: Type[Encoder]):
         lens_n = torch.randint(Tmin, Tmax + 1, (1,))
         x_n = torch.rand(1, lens_n.item(), H)
         x_exp_n, lens__n = encoder(x_n)
-        assert x_exp_n.size(-1) == encoder.hidden_size
+        assert x_exp_n.size(-1) == encoder.output_size
         assert not (x_exp_n == 0).all()  # check we're not just padding nothing
         assert lens__n is None
         x.append(x_n.flatten())
