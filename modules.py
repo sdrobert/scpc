@@ -173,7 +173,11 @@ class IdentityEncoder(Encoder):
 
 class ConvEncoder(Encoder):
     def __init__(
-        self, input_size: int, output_size: int = 256, dropout_prob: float = 0.1
+        self,
+        input_size: int,
+        output_size: int = 256,
+        channel_norm_epsilon: float = 1e-5,
+        dropout_prob: float = 0.1,
     ) -> None:
         check_positive("dropout_prob", dropout_prob)
         super().__init__(input_size, output_size)
@@ -181,18 +185,18 @@ class ConvEncoder(Encoder):
         self.relu = torch.nn.ReLU()
         self.mask0 = MaskingLayer(1, 1, 0)
         self.conv1 = torch.nn.Conv1d(input_size, output_size, 10, 5, 3)
-        self.norm1 = ChannelNorm(output_size)
+        self.norm1 = ChannelNorm(output_size, channel_norm_epsilon)
         self.mask1 = MaskingLayer(10, 5, 3)
         self.conv2 = torch.nn.Conv1d(output_size, output_size, 8, 4, 2)
-        self.norm2 = ChannelNorm(output_size)
+        self.norm2 = ChannelNorm(output_size, channel_norm_epsilon)
         self.mask2 = MaskingLayer(8, 4, 2)
         self.conv3 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
-        self.norm3 = ChannelNorm(output_size)
+        self.norm3 = ChannelNorm(output_size, channel_norm_epsilon)
         self.mask3 = MaskingLayer(4, 2, 1)
         self.conv4 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
-        self.norm4 = ChannelNorm(output_size)
+        self.norm4 = ChannelNorm(output_size, channel_norm_epsilon)
         self.conv5 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
-        self.norm5 = ChannelNorm(output_size)
+        self.norm5 = ChannelNorm(output_size, channel_norm_epsilon)
 
     def reset_parameters(self) -> None:
         self.conv1.reset_parameters()
@@ -344,7 +348,6 @@ class RecurrentEncoder(Encoder):
             batch_first=True,
             dropout=0.0 if num_layers == 1 else dropout_prob,
         )
-        self.drop = torch.nn.Dropout(dropout_prob)
 
     def downsampling_factor(self) -> int:
         return 1
@@ -358,7 +361,6 @@ class RecurrentEncoder(Encoder):
         x = self.rnn(x)[0]
         if lens is not None:
             x = torch.nn.utils.rnn.pad_packed_sequence(x, True, 0, T)[0]
-        x = self.drop(x)
         return x, lens
 
 
