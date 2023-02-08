@@ -15,9 +15,11 @@ dependencies:
   - pysoundfile
   - python
   - pytorch-lightning>=1.7
-  - pytorch::pytorch-cuda
+  - pytorch::pytorch-cuda>=1.10
   - requests
   - ruamel.yaml
   - sentencepiece=0.1.95
+  - setuptools
+  - setuptools_scm
   - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
     - "git+https://github.com/sdrobert/pydrobert-pytorch.git"
