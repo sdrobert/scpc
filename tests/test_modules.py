@@ -104,7 +104,7 @@ def test_cpc_prediction_network_matches_manual_comp(embedding):
                 num = Az_n_k_t @ latent_n_tpk
                 assert num.numel() == 1
                 latent_samp_n_t = latent_samp_n[t]  # (M, Cl)
-                denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0)
+                denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0).logaddexp(num)
                 assert denom.numel() == 1
                 loss_exp = loss_exp - (num - denom)
                 norm += 1

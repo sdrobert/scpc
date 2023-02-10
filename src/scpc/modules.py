@@ -16,7 +16,7 @@
 # limitations under the License.
 
 import abc
-from typing import Collection, Literal, Optional, Tuple, Type
+from typing import Collection, Literal, Optional, Tuple
 
 import torch
 
@@ -447,6 +447,7 @@ class CPCLossNetwork(torch.nn.Module):
         phi_k = self.unfold(latent[:, 1:].unsqueeze(1))  # (N, K * C, Tp)
         phi_k = phi_k.transpose(1, 2).reshape(N * Tp * K, 1, C)
         num = torch.bmm(phi_k, Az).view(N, Tp, K)
+        denom = num.logaddexp(denom)
         del phi_k
 
         loss = denom - num  # neg num - denom

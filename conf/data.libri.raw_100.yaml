@@ -1,0 +1,7 @@
+common:
+  batch_size: 1 # Number of elements in a batch.
+  drop_last: true # Whether to drop a batch when there are too few samples to match its size.
+train_dir: data/librispeech/raw_100/train_clean_100
+val_dir: data/librispeech/raw_100/train_2kshort
+test_dir: data/librispeech/raw_100/train_2kshort
+info_path: data/librispeech/raw_100/ext/train_clean_100.info.ark
