@@ -1,0 +1,12 @@
+These files were pulled and modified from 
+
+  https://drive.google.com/drive/folders/1BhJ2umKH3whguxMwifaKtSra0TgAbtfb
+
+last accessed Feb 10, 2023.
+
+They were part of the experimentation of https://arxiv.org/abs/1807.03748
+
+  van der Oord. 2019. Representation learning with Contrastive Predictive Coding
+
+Phone alignments were, in turn, extracted from Kaldi
+https://github.com/kaldi-asr/kaldi/tree/master/egs/librispeech/s5.
