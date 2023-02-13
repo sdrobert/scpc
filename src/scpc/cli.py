@@ -69,7 +69,8 @@ def main(args: Optional[Sequence[str]] = None):
         suppress_alis=False,
         suppress_uttids=False,
         batch_first=True,
-        shuffle=False,
+        # shuffle=False,
+        pin_memory=False,
     )
 
     if options.cmd == "fit":

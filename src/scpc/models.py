@@ -13,10 +13,10 @@
 # limitations under the License.
 
 import argparse
+import logging
 import re
 
-from typing import Literal, Optional, Tuple
-from zlib import adler32
+from typing import Dict, Literal, Optional, Tuple
 
 import torch
 import param
@@ -93,16 +93,16 @@ class CPCLossParams(param.Parameterized):
     negative_samples: int = param.Integer(
         128, bounds=(1, None), doc="Number of negative samples to estimate with"
     )
-    num_sources: int = param.Integer(
-        0,
-        bounds=(0, None),
-        doc="Number of sources to construct embeddings for. Source hashes will be "
-        "extracted from utterance ids. 0 means no embeddings will be used",
+    num_speakers: Optional[int] = param.Integer(
+        None,
+        bounds=(1, None),
+        doc="Number of speakers to construct embeddings for. Source hashes will be "
+        "extracted from utterance ids. Unset means no embeddings used",
     )
-    source_regex: str = param.String(
+    speaker_regex: str = param.String(
         r"^lbi-([^-]+)-.*$",
         doc="Regular expression to extract speaker id from utterance id. Must contain "
-        "one group to be used as the speaker id. Will be hashed",
+        "one group to be used as the speaker id",
     )
 
 
@@ -165,9 +165,11 @@ class TrainingParams(param.Parameterized):
         doc="Parameters for CPC loss (if loss_type = 'cpc')",
     )
 
-    def initialize_set_parameters(self):
-        self.chunking = ChunkingParams(name="chunking")
-        self.cpc_loss = CPCLossParams(name="cpc_loss")
+    def initialize_missing(self):
+        if self.chunking is None:
+            self.chunking = ChunkingParams(name="chunking")
+        if self.cpc_loss is None:
+            self.cpc_loss = CPCLossParams(name="cpc_loss")
 
 
 class PretrainedFrontendParams(param.Parameterized):
@@ -216,20 +218,25 @@ class PretrainedFrontendParams(param.Parameterized):
         TrainingParams, instantiate=False, doc="Parameters for training"
     )
 
-    def initialize_set_parameters(self):
-        self.conv = ConvEncoderParams(name="conv")
-        self.csa = CausalSelfAttentionEncoderParams(name="csa")
-        self.sa = SelfAttentionEncoderParams(name="sa")
-        self.recur = RecurrentEncoderParams(name="recur")
-        self.training = TrainingParams(name="training")
-        self.training.initialize_set_parameters()
+    def initialize_missing(self):
+        if self.conv is None:
+            self.conv = ConvEncoderParams(name="conv")
+        if self.csa is None:
+            self.csa = CausalSelfAttentionEncoderParams(name="csa")
+        if self.sa is None:
+            self.sa = SelfAttentionEncoderParams(name="sa")
+        if self.recur is None:
+            self.recur = RecurrentEncoderParams(name="recur")
+        if self.training is None:
+            self.training = TrainingParams(name="training")
+        self.training.initialize_missing()
 
 
 Batch = Tuple[
     torch.Tensor,  # feats
     Optional[torch.Tensor],  # alis
     Optional[torch.Tensor],  # refs
-    torch.Tensor,  # feat_sizes
+    Optional[torch.Tensor],  # feat_sizes
     Optional[torch.Tensor],  # ref_sizes
     Tuple[str, ...],  # utt_ids
 ]
@@ -243,11 +250,15 @@ class PretrainedFrontend(pl.LightningModule):
     slicer: Optional[SliceSpectData]
     chunker: Optional[ChunkBySlices]
 
-    _source_regex: Optional[re.Pattern[str]]
+    _speaker_regex: Optional[re.Pattern[str]]
+    _speaker_map: Dict[str, int]
+    _speaker_min: int
 
     def __init__(self, params: PretrainedFrontendParams) -> None:
         super().__init__()
         self.params = params
+        self._speaker_map = dict()
+        self._speaker_min = -1
 
         if params.latent_type == "conv":
             self.latent = ConvEncoder(
@@ -296,22 +307,22 @@ class PretrainedFrontend(pl.LightningModule):
             raise NotImplementedError
 
         if params.training.loss_type == "cpc":
-            num_sources = params.training.cpc_loss.num_sources
-            if num_sources:
-                self._source_regex = re.compile(params.training.cpc_loss.source_regex)
-                if self._source_regex.groups != 1:
+            num_speakers = params.training.cpc_loss.num_speakers
+            if num_speakers is not None:
+                self._speaker_regex = re.compile(params.training.cpc_loss.speaker_regex)
+                if self._speaker_regex.groups != 1:
                     raise ValueError(
-                        f"expected one group in regex '{self._source_regex.pattern}'; "
-                        f"got {self._source_regex.groups}"
+                        f"expected one group in regex '{self._speaker_regex.pattern}'; "
+                        f"got {self._speaker_regex.groups}"
                     )
             else:
-                num_sources = self._source_regex = None
+                self._speaker_regex = None
             self.cpc_loss = CPCLossNetwork(
                 self.latent.output_size,
                 self.context.output_size,
                 params.training.cpc_loss.prediction_steps,
                 params.training.cpc_loss.negative_samples,
-                num_sources,
+                num_speakers,
                 params.training.dropout_prob,
             )
         else:
@@ -344,54 +355,36 @@ class PretrainedFrontend(pl.LightningModule):
     def downsampling_factor(self) -> int:
         return self.context.downsampling_factor * self.latent.downsampling_factor
 
+    def get_speakers_from_uttids(self, utt_ids: Tuple[str, ...]) -> torch.Tensor:
+        speakers = torch.empty(len(utt_ids), dtype=torch.long)
+        if self._speaker_regex is None:
+            return speakers
+        num_speakers = self.params.training.cpc_loss.num_speakers
+        assert num_speakers is not None
+        for n, utt_id in enumerate(utt_ids):
+            speaker = self._speaker_regex.match(utt_id).group(0)
+            id_ = self._speaker_map.get(speaker, None)
+            if id_ is None:
+                self._speaker_min += 1
+                if self._speaker_min >= num_speakers:
+                    logger = logging.getLogger("pytorch_lightning")
+                    logger.warn(f"number of speakers exceeded {num_speakers}")
+                    self._speaker_min = num_speakers
+                id_ = self._speaker_min
+            speakers[n] = id_
+        return speakers
+
     def pretrain_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
-        if len(batch) != 6:
-            raise ValueError(
-                f"batch {batch_idx} incorrect tuple length. Should be feats, alis, "
-                "refs, feat_sizes, ref_sizes, uttids"
-            )
-        feats, alis, refs, feat_sizes, ref_sizes, uttids = batch
-        if self.params.training.chunking.policy != "none":
-            if self.params.training.chunking.policy == "fixed":
-                slices, sources = self.slicer(feats, feat_sizes)
-            elif self.params.training.chunking.policy == "ali":
-                if alis is None:
-                    raise ValueError("chunking policy is 'ali' but alis is None")
-                slices, sources = self.slicer(alis, feat_sizes)
-            else:
-                if refs is None or ref_sizes is None:
-                    raise ValueError(
-                        "chunking policy is 'ref' but refs or ref_sizes is None"
-                    )
-                slices, sources = self.slicer(refs, ref_sizes, feat_sizes)
-            uttids = tuple(uttids[i] for i in sources.tolist())
-            feats, feat_sizes = self.chunker(
-                feats[sources], slices, feat_sizes[sources]
-            )
-            del sources, slices
-        del alis, refs, ref_sizes
-        if self.training_is_fixed_width:
-            feat_sizes = None
+        feats, _, _, feat_sizes, _, utt_ids = batch
+        if len(utt_ids) == 0:
+            return feats.new_zeros(1)
+        speakers = self.get_speakers_from_uttids(utt_ids).to(feats.device)
         latent, lens = self.latent(feats, feat_sizes)
-        del feats
         context, lens = self.context(latent, lens)
         if self.params.training.loss_type == "cpc":
-            if self._source_regex is not None:
-                sources = torch.tensor(
-                    [
-                        adler32(self._source_regex.match(x).group(0).encode("ascii"))
-                        % self.params.training.cpc_loss.num_sources
-                        for x in uttids
-                    ],
-                    dtype=torch.long,
-                    device=context.device,
-                )
-            else:
-                sources = None
-            loss = self.cpc_loss(latent, context, lens, sources)
+            loss = self.cpc_loss(latent, context, lens, speakers)
         else:
             raise NotImplementedError
-        del context, latent, lens
         return loss
 
     def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
@@ -407,6 +400,30 @@ class PretrainedFrontend(pl.LightningModule):
         loss = self.pretrain_step(batch, batch_idx)
         self.log("test_loss", loss, batch_size=batch[0].size(0), sync_dist=True)
         return loss
+
+    def on_before_batch_transfer(self, batch: Batch, dataloader_idx: int) -> Batch:
+        feats, alis, refs, feat_sizes, ref_sizes, utt_ids = batch
+        if self.params.training.chunking.policy != "none":
+            if self.params.training.chunking.policy == "fixed":
+                slices, sources = self.slicer(feats, feat_sizes)
+            elif self.params.training.chunking.policy == "ali":
+                if alis is None:
+                    raise ValueError("chunking policy is 'ali' but alis is None")
+                slices, sources = self.slicer(alis, feat_sizes)
+            else:
+                if refs is None or ref_sizes is None:
+                    raise ValueError(
+                        "chunking policy is 'ref' but refs or ref_sizes is None"
+                    )
+                slices, sources = self.slicer(refs, ref_sizes, feat_sizes)
+            feats, feat_sizes = self.chunker(
+                feats[sources], slices, feat_sizes[sources]
+            )
+            if self.training_is_fixed_width:
+                feat_sizes = None
+            utt_ids = tuple(utt_ids[src] for src in sources)
+            del sources, slices
+        return feats, None, None, feat_sizes, None, utt_ids
 
     def forward(
         self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor]
@@ -438,7 +455,7 @@ class PretrainedFrontend(pl.LightningModule):
         print_format_str: Optional[str] = None,
     ):
         params = PretrainedFrontendParams(name="model_params")
-        params.initialize_set_parameters()
+        params.initialize_missing()
 
         if print_format_str is not None:
             pargparse.add_serialization_group_to_parser(
@@ -453,5 +470,6 @@ class PretrainedFrontend(pl.LightningModule):
     @classmethod
     def from_argparse_args(cls, namespace: argparse.Namespace, **kwargs):
         params = namespace.params
+        params.initialize_missing()
         return cls(params, **kwargs)
 

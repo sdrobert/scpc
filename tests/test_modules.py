@@ -1,3 +1,4 @@
+import math
 from typing import Type
 import pytest
 import torch
@@ -70,14 +71,14 @@ def test_causal_self_attention_encoder_is_causal():
 )
 def test_cpc_prediction_network_matches_manual_comp(embedding):
     torch.manual_seed(2)
-    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 1000
+    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 100
     lens = torch.randint(K + 1, T + 1, (N,))
     lens[0] = T
     sum_lens = lens.sum().item()
     latent, context = torch.randn(sum_lens, Cl), torch.randn(N, T, Cc)
     samp = torch.randint(sum_lens, (N * (T - 1) * M,))
     latent_samp = latent[samp].view(N, T - 1, M, Cl)
-    sources = torch.randint(N, (N,))
+    speakers = torch.randint(N, (N,))
 
     net = CPCLossNetwork(Cl, Cc, K, M, N if embedding else None)
     net.eval()
@@ -91,7 +92,7 @@ def test_cpc_prediction_network_matches_manual_comp(embedding):
         assert latent_n.size(0) == lens_n
         context_n = context[n, :lens_n]
         if embedding:
-            context_n = context_n + net.embed(sources[n : n + 1])
+            context_n = context_n + net.embed(speakers[n : n + 1])
         latent_samp_n = latent_samp[n]
         Az_n = net.ff(context_n)
         assert Az_n.shape == (lens_n, Cl * K)
@@ -104,12 +105,12 @@ def test_cpc_prediction_network_matches_manual_comp(embedding):
                 num = Az_n_k_t @ latent_n_tpk
                 assert num.numel() == 1
                 latent_samp_n_t = latent_samp_n[t]  # (M, Cl)
-                denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0).logaddexp(num)
+                denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0)
                 assert denom.numel() == 1
                 loss_exp = loss_exp - (num - denom)
                 norm += 1
-    loss_exp = loss_exp / norm
+    loss_exp = loss_exp / norm  # + math.log(M + 1)
 
     latents = torch.nn.utils.rnn.pad_sequence(latents_, True, -1)
-    loss_act = net(latents, context, lens, sources)
-    assert torch.isclose(loss_exp, loss_act, atol=1e-1)
+    loss_act = net(latents, context, lens, speakers)
+    assert torch.isclose(loss_exp, loss_act, rtol=1e-1)

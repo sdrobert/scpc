@@ -16,6 +16,7 @@
 # limitations under the License.
 
 import abc
+import math
 from typing import Collection, Literal, Optional, Tuple
 
 import torch
@@ -380,7 +381,7 @@ class CPCLossNetwork(torch.nn.Module):
         context_size: Optional[int] = None,
         prediction_steps: int = 12,
         negative_samples: int = 128,
-        num_sources: Optional[int] = None,
+        num_speakers: Optional[int] = None,
         dropout_prob: float = 0.1,
     ) -> None:
         check_positive("latent_size", latent_size)
@@ -390,15 +391,15 @@ class CPCLossNetwork(torch.nn.Module):
             check_positive("context_size", context_size)
         check_positive("prediction_steps", prediction_steps)
         check_positive("negative_samples", negative_samples)
-        if num_sources is not None:
-            check_positive("num_sources", num_sources)
+        if num_speakers is not None:
+            check_positive("num_speakers", num_speakers)
         check_positive("dropout_prob", dropout_prob)
         super().__init__()
         self.negative_samples = negative_samples
         self.prediction_steps = prediction_steps
 
-        if num_sources is not None:
-            self.embed = torch.nn.Embedding(num_sources, context_size)
+        if num_speakers is not None:
+            self.embed = torch.nn.Embedding(num_speakers, context_size)
         else:
             self.register_module("embed", None)
 
@@ -419,7 +420,7 @@ class CPCLossNetwork(torch.nn.Module):
             context = latent
 
         N, T, C = latent.shape
-        assert N > 0 and T > 0
+        assert N > 0 and T > 0, (N, T)
         assert context.shape[:2] == (N, T)
         K, M = self.prediction_steps, self.negative_samples
         Tp = T - self.prediction_steps
@@ -457,4 +458,5 @@ class CPCLossNetwork(torch.nn.Module):
             mask = get_length_mask(loss, lens - K, seq_dim=1)
             loss = loss.masked_fill(~mask, 0.0).sum()
             loss = loss / norm
-        return loss
+        return loss  # + math.log(M + 1)
+
