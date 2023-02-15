@@ -7,8 +7,8 @@ I=10
 
 set -e
 
-# Download librispeech and turn into (raw) tensors.
-if [ -z "$LIBRISPEECH_DIR" ]; then
+if [ -z "$LIBRISPEECH_DIR" ] &&  [ ! -f "$data/.complete.2" ]; then
+    # Download librispeech and turn into (raw) tensors.
     LIBRISPEECH_DIR="$data/local/data"
     if [ ! -f "$LIBRISPEECH_DIR/.complete" ]; then
         python prep/librispeech.py "$data" download
