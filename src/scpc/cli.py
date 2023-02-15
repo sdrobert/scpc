@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import argparse
+import logging
 import os
 import sys
 from typing import Optional, Sequence
@@ -21,6 +22,8 @@ import torch
 import numpy as np
 import pytorch_lightning as pl
 
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 from pydrobert.torch.lightning import LitSpectDataModule
 
 from .models import PretrainedFrontend
@@ -31,17 +34,22 @@ def main(args: Optional[Sequence[str]] = None):
     parser = argparse.ArgumentParser(
         description=main.__doc__, fromfile_prefix_chars="@"
     )
-    LitSpectDataModule.add_argparse_args(
-        parser,
-        read_format_str="--read-data-{file_format}",
-        print_format_str="--print-data-{file_format}",
-    )
     subparsers = parser.add_subparsers(
         help="which routine to run", dest="cmd", required=True
     )
 
     fit_parser = subparsers.add_parser("fit")
-    fit_parser.add_argument("ckpt", help="Where to store best model checkpoint")
+    fit_parser.add_argument(
+        "--version",
+        type=int,
+        default=None,
+        help="What version/run of this model to perform/continue",
+    )
+    LitSpectDataModule.add_argparse_args(
+        fit_parser,
+        read_format_str="--read-data-{file_format}",
+        print_format_str="--print-data-{file_format}",
+    )
     PretrainedFrontend.add_argparse_args(
         fit_parser,
         read_format_str="--read-model-{file_format}",
@@ -64,21 +72,42 @@ def main(args: Optional[Sequence[str]] = None):
 
     options = parser.parse_args(args)
 
-    data = LitSpectDataModule.from_argparse_args(
-        options,
-        suppress_alis=False,
-        suppress_uttids=False,
-        batch_first=True,
-        # shuffle=False,
-        pin_memory=False,
-    )
-
     if options.cmd == "fit":
+        data = LitSpectDataModule.from_argparse_args(
+            options,
+            suppress_alis=False,
+            suppress_uttids=False,
+            batch_first=True,
+            # shuffle=False,
+            pin_memory=False,
+        )
         model = PretrainedFrontend.from_argparse_args(options)
-        trainer = pl.Trainer.from_argparse_args(options, replace_sampler_ddp=False)
-        trainer.fit(model, data)
-        trainer.save_checkpoint(options.ckpt)
+        root_dir = options.default_root_dir
+        if root_dir is None:
+            root_dir = os.getcwd()
+        model_name = model.params.name
+        if model_name == "model_params":
+            logging.getLogger("pytorch_lightning").warn(
+                "saving with default model name 'model_name'. Use a non-default "
+                "name to avoid clobbering with different configurations"
+            )
+        model_dir = os.path.join(root_dir, model_name)
+        if options.version is not None:
+            model_dir = os.path.join(model_dir, f"version_{options.version}")
+        os.makedirs(model_dir, exist_ok=True)
+        cc = ModelCheckpoint(model_dir, save_last=True)
+        logger_dir = os.path.join(root_dir, "tb_logs")
+        os.makedirs(logger_dir, exist_ok=True)
+        logger = TensorBoardLogger(logger_dir, model_name, options.version)
+        trainer: pl.Trainer = pl.Trainer.from_argparse_args(
+            options, replace_sampler_ddp=False, callbacks=[cc], logger=logger
+        )
+        trainer.fit(model, data, ckpt_path="last")
+        if not trainer.interrupted:
+            # require training to have finished
+            trainer.save_checkpoint(os.path.join(model_dir, "best.ckpt"))
     elif options.cmd == "predict":
+        raise NotImplementedError
         # XXX(sdrobert): we handle this loop ourselves so no ddp stuff is going on.
         device = options.device
         if device is None:

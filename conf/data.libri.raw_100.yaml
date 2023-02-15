@@ -1,6 +1,0 @@
-common:
-  batch_size: 1
-  drop_last: true  # for ddp
-train_dir: data/librispeech/raw/train_clean_100_train_subset
-val_dir: data/librispeech/raw/train_clean_100_test_subset
-info_path: data/librispeech/raw/ext/train_clean_100.info.ark
