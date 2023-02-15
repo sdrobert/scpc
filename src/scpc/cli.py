@@ -25,6 +25,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pydrobert.torch.lightning import LitSpectDataModule
+from pydrobert.torch.data import SpectDataSet
 
 from .models import PretrainedFrontend
 
@@ -57,13 +58,14 @@ def main(args: Optional[Sequence[str]] = None):
     )
     pl.Trainer.add_argparse_args(fit_parser)
 
-    predict_parser = subparsers.add_parser("predict")
-    predict_parser.add_argument("ckpt", help="Checkpoint to load")
-    predict_parser.add_argument("dir", help="Where to store predictions")
-    predict_parser.add_argument(
+    dump_parser = subparsers.add_parser("dump")
+    dump_parser.add_argument("ckpt", help="Checkpoint to load")
+    dump_parser.add_argument("in_dir", help="Path to SpectDataSet dir to read from")
+    dump_parser.add_argument("out_dir", help="Where to store representations")
+    dump_parser.add_argument(
         "--device", default=None, type=torch.device, help="Which device to run on"
     )
-    predict_parser.add_argument(
+    dump_parser.add_argument(
         "--numpy",
         action="store_true",
         default=False,
@@ -106,28 +108,25 @@ def main(args: Optional[Sequence[str]] = None):
         if not trainer.interrupted:
             # require training to have finished
             trainer.save_checkpoint(os.path.join(model_dir, "best.ckpt"))
-    elif options.cmd == "predict":
-        raise NotImplementedError
+    elif options.cmd == "dump":
         # XXX(sdrobert): we handle this loop ourselves so no ddp stuff is going on.
         device = options.device
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = PretrainedFrontend.load_from_checkpoint(options.ckpt).to(device)
         model.eval()
-        data.prepare_data()
-        data.setup()
-        dl = data.predict_dataloader()
-        os.makedirs(options.dir, exist_ok=True)
-        for feats, _, _, feat_lens, _, uttids in dl:
-            feats, feat_lens = feats.to(device), feat_lens.to(device)
-            x, lens = model(feats, feat_lens)
-            for x_n, lens_n, uttids_n in zip(x, lens, uttids):
-                prefix = os.path.join(options.dir, uttids_n)
-                x_n = x_n[:lens_n].cpu()
-                if options.numpy:
-                    np.save(prefix + ".npy", x_n.numpy())
-                else:
-                    torch.save(x_n, prefix + ".pt")
+        ds = SpectDataSet(options.in_dir, suppress_alis=True, suppress_uttids=True)
+        os.makedirs(options.out_dir, exist_ok=True)
+        for feats, _, utt_id in ds:
+            prefix = os.path.join(options.out_dir, utt_id)
+            feats = feats.to(device).unsqueeze(0)
+            x, lens = model(feats)
+            assert lens is None
+            x = x.squeeze(1).cpu()
+            if options.numpy:
+                np.save(prefix + ".npy", x.numpy())
+            else:
+                torch.save(x, prefix + ".pt")
 
     else:
         raise NotImplementedError
