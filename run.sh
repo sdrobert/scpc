@@ -37,6 +37,7 @@ if [ ! -f "$data/.complete.3" ]; then
     # at the end of the recording. We thus use the alignment of the final frame
     # for an additional 399 frames, then crop using get-torch-spect-data-dir-info.
     for i in $(seq 1 $I); do
+        rm -f "$data/.complete.3-$i"
         unzip -cq resources/converted_aligned_phones.zip | \
             awk -v spf=160 -v pad=399 -v i=$i -v I=$I '
         (NR + i - 2) % I == 0 {
@@ -48,9 +49,16 @@ if [ ! -f "$data/.complete.3" ]; then
             write-table-to-torch-dir \
                 -i iv -o long \
                 'ark,t,s,o:-' \
-                "$data/raw/train_clean_100/ali" &
+                "$data/raw/train_clean_100/ali" && \
+            touch "$data/.complete.3-$i" &
     done
     wait
+    for i in $(seq 1 $I); do
+        if [ ! -f "$data/.complete.3-$i" ]; then
+            echo -e "Process $i/$I failed!"
+            exit 1
+        fi
+    done
     touch "$data/.complete.3"
 fi
 
