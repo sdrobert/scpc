@@ -1,26 +1,34 @@
 name: scpc
 channels:
-  # - pytorch
-  # - nvidia
+  - pytorch
+  - nvidia
   - conda-forge
   - sdrobert
   - defaults
 dependencies:
+  - ipython
   - jiwer
-  - nltk=3.5
+  - nltk 3.5
   - pip
   - pydrobert-kaldi
-  - pydrobert-param>=0.4.0
+  - pydrobert-param >=0.4.0
   - pydrobert-speech
   - pysoundfile
+  - pytest
   - python
-  - pytorch-lightning>=1.7
-  - pytorch-gpu
+  - pytorch-lightning >=1.7
+  - pytorch::pytorch 1.13.1
+  - pytorch::pytorch-cuda 11.6
   - requests
   - ruamel.yaml
   - sentencepiece
   - setuptools
   - setuptools_scm
   - tensorboard
+  - torchaudio 0.13.1
+  - virtual-dataset
+  - zerospeech-benchmarks
+  - zerospeech-libriabx2
+  - zerospeech-tde
   # - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
   #   - "git+https://github.com/sdrobert/pydrobert-pytorch.git"

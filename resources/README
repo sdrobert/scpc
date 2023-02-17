@@ -1,4 +1,5 @@
-These files were pulled and modified from 
+The files {converted_aligned_phones.zip, train_clean_100_*_subset.txt} were
+pulled and modified from 
 
   https://drive.google.com/drive/folders/1BhJ2umKH3whguxMwifaKtSra0TgAbtfb
 
@@ -10,3 +11,6 @@ They were part of the experimentation of https://arxiv.org/abs/1807.03748
 
 Phone alignments were, in turn, extracted from Kaldi
 https://github.com/kaldi-asr/kaldi/tree/master/egs/librispeech/s5.
+
+libri_to_abxLS.map is based on the various partitions used in the abxLS task
+of zerospeech (https://zerospeech.com/tasks/task_1/tasks_goals/).

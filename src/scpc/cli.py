@@ -39,7 +39,13 @@ def main(args: Optional[Sequence[str]] = None):
         help="which routine to run", dest="cmd", required=True
     )
 
-    fit_parser = subparsers.add_parser("fit")
+    PretrainedFrontend.add_argparse_args(
+        parser,
+        read_format_str="--read-model-{file_format}",
+        print_format_str="--print-model-{file_format}",
+    )
+
+    fit_parser = subparsers.add_parser("fit", help="Train a model")
     fit_parser.add_argument(
         "--version",
         type=int,
@@ -51,29 +57,40 @@ def main(args: Optional[Sequence[str]] = None):
         read_format_str="--read-data-{file_format}",
         print_format_str="--print-data-{file_format}",
     )
-    PretrainedFrontend.add_argparse_args(
-        fit_parser,
-        read_format_str="--read-model-{file_format}",
-        print_format_str="--print-model-{file_format}",
-    )
     pl.Trainer.add_argparse_args(fit_parser)
 
-    dump_parser = subparsers.add_parser("dump")
-    dump_parser.add_argument("ckpt", help="Checkpoint to load")
-    dump_parser.add_argument("in_dir", help="Path to SpectDataSet dir to read from")
-    dump_parser.add_argument("out_dir", help="Where to store representations")
-    dump_parser.add_argument(
+    predict_parser = subparsers.add_parser(
+        "predict", help="Output hidden states of trained model"
+    )
+    predict_parser.add_argument(
+        "pt", type=argparse.FileType("rb"), help="Path to state_dict to load"
+    )
+    predict_parser.add_argument("in_dir", help="Path to SpectDataSet dir to read from")
+    predict_parser.add_argument("out_dir", help="Where to store representations")
+    predict_parser.add_argument(
         "--device", default=None, type=torch.device, help="Which device to run on"
     )
-    dump_parser.add_argument(
+    predict_parser.add_argument(
         "--numpy",
         action="store_true",
         default=False,
         help="Whether to store as .npy files",
     )
 
+    info_parser = subparsers.add_parser(
+        "info", help="Print info about model based on configuration"
+    )
+    info_parser.add_argument(
+        "out",
+        nargs="?",
+        type=argparse.FileType("w"),
+        default=sys.stdout,
+        help="Where to write info to. Default is stdout",
+    )
+
     options = parser.parse_args(args)
 
+    plm = PretrainedFrontend.from_argparse_args(options)
     if options.cmd == "fit":
         data = LitSpectDataModule.from_argparse_args(
             options,
@@ -83,11 +100,10 @@ def main(args: Optional[Sequence[str]] = None):
             # shuffle=False,
             pin_memory=False,
         )
-        model = PretrainedFrontend.from_argparse_args(options)
         root_dir = options.default_root_dir
         if root_dir is None:
             root_dir = os.getcwd()
-        model_name = model.params.name
+        model_name = plm.params.name
         if model_name == "model_params":
             logging.getLogger("pytorch_lightning").warn(
                 "saving with default model name 'model_name'. Use a non-default "
@@ -104,30 +120,44 @@ def main(args: Optional[Sequence[str]] = None):
         trainer: pl.Trainer = pl.Trainer.from_argparse_args(
             options, replace_sampler_ddp=False, callbacks=[cc], logger=logger
         )
-        trainer.fit(model, data, ckpt_path="last")
+        trainer.fit(plm, data, ckpt_path="last")
         if not trainer.interrupted:
             # require training to have finished
-            trainer.save_checkpoint(os.path.join(model_dir, "best.ckpt"))
-    elif options.cmd == "dump":
+            plm = PretrainedFrontend.load_from_checkpoint(
+                cc.best_model_path, params=plm.params
+            )
+            torch.save(plm.get_model().state_dict(), os.path.join(model_dir, "best.pt"))
+    elif options.cmd == "predict":
         # XXX(sdrobert): we handle this loop ourselves so no ddp stuff is going on.
         device = options.device
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = PretrainedFrontend.load_from_checkpoint(options.ckpt).to(device)
+        options.params.initialize_missing()
+        model = plm.get_model().to(device)
+        del plm
+        state_dict = torch.load(options.pt, device)
+        model.load_state_dict(state_dict)
         model.eval()
-        ds = SpectDataSet(options.in_dir, suppress_alis=True, suppress_uttids=True)
+        ds = SpectDataSet(options.in_dir, suppress_alis=True, suppress_uttids=False)
         os.makedirs(options.out_dir, exist_ok=True)
-        for feats, _, utt_id in ds:
-            prefix = os.path.join(options.out_dir, utt_id)
-            feats = feats.to(device).unsqueeze(0)
-            x, lens = model(feats)
-            assert lens is None
-            x = x.squeeze(1).cpu()
-            if options.numpy:
-                np.save(prefix + ".npy", x.numpy())
-            else:
-                torch.save(x, prefix + ".pt")
-
+        with torch.no_grad():
+            for feats, _, utt_id in ds:
+                prefix = os.path.join(options.out_dir, utt_id)
+                feats = feats.to(device).unsqueeze(0)
+                x, lens = model(feats)
+                assert lens is None
+                x = x.squeeze(0).cpu()
+                if options.numpy:
+                    np.save(prefix + ".npy", x.double().numpy())
+                else:
+                    torch.save(x, prefix + ".pt")
+    elif options.cmd == "info":
+        out = options.out
+        out.write(f"input_size {plm.input_size}\n")
+        out.write(f"output_size {plm.output_size}\n")
+        out.write(f"downsampling_factor {plm.downsampling_factor}\n")
+        out.write(f"num_model_params {plm.num_model_parameters}\n")
+        out.write(f"num_total_params {plm.num_total_parameters}\n")
     else:
         raise NotImplementedError
 

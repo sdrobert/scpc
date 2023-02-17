@@ -1,3 +1,4 @@
 name: cpc.20480
+system_description: "Standard CPC but with transformer network"
 csa:
   max_width: 128

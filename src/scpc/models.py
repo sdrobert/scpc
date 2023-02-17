@@ -13,13 +13,15 @@
 # limitations under the License.
 
 import argparse
+import itertools
 import logging
 import re
 
-from typing import Dict, Literal, Optional, Tuple
+from typing import Dict, Iterator, Literal, Optional, Tuple
 
 import torch
 import param
+import numpy as np
 import pytorch_lightning as pl
 import pydrobert.param.argparse as pargparse
 
@@ -174,6 +176,10 @@ class TrainingParams(param.Parameterized):
 
 class PretrainedFrontendParams(param.Parameterized):
 
+    system_description: str = param.String(
+        "", doc="Description of the system for ZRC submission"
+    )
+
     input_size: int = param.Integer(
         1, bounds=(1, None), doc="Size of input feature dimension (1 for raw)"
     )
@@ -240,6 +246,20 @@ Batch = Tuple[
     Optional[torch.Tensor],  # ref_sizes
     Tuple[str, ...],  # utt_ids
 ]
+
+
+class Model(torch.nn.Module):
+    def __init__(self, latent: Encoder, context: Encoder) -> None:
+        super().__init__()
+        self.latent = latent
+        self.context = context
+
+    def forward(
+        self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        x, lens = self.latent(x, lens)
+        x, lens = self.context(x, lens)
+        return x, lens
 
 
 class PretrainedFrontend(pl.LightningModule):
@@ -348,12 +368,37 @@ class PretrainedFrontend(pl.LightningModule):
             self.register_module("chunker", None)
 
     @property
+    def input_size(self) -> int:
+        return self.params.input_size
+
+    @property
+    def output_size(self) -> int:
+        return self.context.output_size
+
+    @property
     def training_is_fixed_width(self) -> bool:
         return self.params.training.chunking.policy == "fixed"
 
     @property
     def downsampling_factor(self) -> int:
         return self.context.downsampling_factor * self.latent.downsampling_factor
+
+    @staticmethod
+    def _num_params(ps: Iterator[torch.Tensor]) -> int:
+        return sum(np.prod(p.shape) for p in ps)
+
+    @property
+    def num_model_parameters(self) -> int:
+        return self._num_params(
+            itertools.chain(self.latent.parameters(), self.context.parameters())
+        )
+
+    @property
+    def num_total_parameters(self) -> int:
+        return self._num_params(self.parameters())
+
+    def get_model(self) -> Model:
+        return Model(self.latent, self.context)
 
     def get_speakers_from_uttids(self, utt_ids: Tuple[str, ...]) -> torch.Tensor:
         speakers = torch.empty(len(utt_ids), dtype=torch.long)
@@ -426,11 +471,9 @@ class PretrainedFrontend(pl.LightningModule):
         return feats, None, None, feat_sizes, None, utt_ids
 
     def forward(
-        self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor]
+        self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        x, lens = self.latent(feats, feat_lens)
-        x, lens = self.context(x, lens)
-        return x, lens
+        return self.model.forward(feats, feat_lens)
 
     def predict_step(
         self, batch: Batch, batch_idx: int
