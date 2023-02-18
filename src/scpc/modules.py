@@ -16,7 +16,6 @@
 # limitations under the License.
 
 import abc
-import math
 from typing import Collection, Literal, Optional, Tuple
 
 import torch
@@ -103,7 +102,7 @@ class ChannelNorm(torch.nn.Module):
 
     epsilon: float
 
-    def __init__(self, num_features: int, epsilon: float = 1e-05, affine: bool = True):
+    def __init__(self, num_features: int, affine: bool = True, epsilon: float = 1e-05):
         check_positive("num_features", num_features)
         check_positive("epsilon", epsilon)
         super(ChannelNorm, self).__init__()
@@ -180,27 +179,39 @@ class ConvEncoder(Encoder):
         self,
         input_size: int,
         output_size: int = 256,
-        channel_norm_epsilon: float = 1e-5,
-        dropout_prob: float = 0.1,
+        norm_style: Literal["none", "batch", "instance", "channel"] = "none",
+        dropout_prob: float = 0.0,
     ) -> None:
-        check_positive("dropout_prob", dropout_prob)
+        check_positive("dropout_prob", dropout_prob, True)
+        check_in("norm_style", norm_style, {"none", "batch", "instance", "channel"})
         super().__init__(input_size, output_size)
+        if norm_style == "none":
+            Norm = lambda: torch.nn.Identity()
+        elif norm_style == "batch":
+            Norm = lambda: torch.nn.BatchNorm1d(output_size)
+        elif norm_style == "instance":
+            Norm = lambda: torch.nn.InstanceNorm1d(
+                output_size, track_running_stats=True
+            )
+        else:
+            Norm = lambda: ChannelNorm(output_size)
+
         self.drop = torch.nn.Dropout(dropout_prob)
         self.relu = torch.nn.ReLU()
         self.mask0 = MaskingLayer(1, 1, 0)
         self.conv1 = torch.nn.Conv1d(input_size, output_size, 10, 5, 3)
-        self.norm1 = ChannelNorm(output_size, channel_norm_epsilon)
+        self.norm1 = Norm()
         self.mask1 = MaskingLayer(10, 5, 3)
         self.conv2 = torch.nn.Conv1d(output_size, output_size, 8, 4, 2)
-        self.norm2 = ChannelNorm(output_size, channel_norm_epsilon)
+        self.norm2 = Norm()
         self.mask2 = MaskingLayer(8, 4, 2)
         self.conv3 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
-        self.norm3 = ChannelNorm(output_size, channel_norm_epsilon)
+        self.norm3 = Norm()
         self.mask3 = MaskingLayer(4, 2, 1)
         self.conv4 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
-        self.norm4 = ChannelNorm(output_size, channel_norm_epsilon)
+        self.norm4 = Norm()
         self.conv5 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
-        self.norm5 = ChannelNorm(output_size, channel_norm_epsilon)
+        self.norm5 = Norm()
 
     def reset_parameters(self) -> None:
         self.conv1.reset_parameters()
@@ -243,15 +254,15 @@ class SelfAttentionEncoder(Encoder):
         num_layers: int = 1,
         num_heads: int = 8,
         dim_feedforward: int = 2048,
-        layer_norm_eps: float = 1e-5,
-        dropout_prob: float = 0.1,
+        dropout_prob: float = 0.0,
         enable_nested_tensor: bool = False,
+        layer_norm_eps: float = 1e-5,
     ) -> None:
         check_positive("num_layers", num_layers)
         check_positive("num_heads", num_heads)
         check_positive("dim_feedforward", dim_feedforward)
         check_positive("layer_norm_eps", layer_norm_eps)
-        check_positive("dropout_prob", dropout_prob)
+        check_positive("dropout_prob", dropout_prob, True)
         super().__init__(input_size)
         self.num_heads = num_heads
         encoder_layer = torch.nn.TransformerEncoderLayer(
@@ -300,9 +311,9 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder):
         num_layers: int = 1,
         num_heads: int = 8,
         dim_feedforward: int = 2048,
-        layer_norm_eps: float = 1e-5,
-        dropout_prob: float = 0.1,
+        dropout_prob: float = 0.0,
         enable_nested_tensor: bool = False,
+        layer_norm_eps: float = 1e-5,
     ) -> None:
         if max_width is not None:
             check_positive("max_width", max_width)
@@ -311,9 +322,9 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder):
             num_layers,
             num_heads,
             dim_feedforward,
-            layer_norm_eps,
             dropout_prob,
             enable_nested_tensor,
+            layer_norm_eps,
         )
         self.max_width = max_width
 
@@ -333,11 +344,11 @@ class RecurrentEncoder(Encoder):
         output_size: int = 256,
         num_layers: int = 1,
         recurrent_type: Literal["gru", "lstm", "rnn"] = "gru",
-        dropout_prob: float = 0.1,
+        dropout_prob: float = 0.0,
     ) -> None:
         check_positive("num_layers", num_layers)
         check_in("recurrent_type", recurrent_type, {"gru", "lstm", "rnn"})
-        check_positive("dropout_prob", dropout_prob)
+        check_positive("dropout_prob", dropout_prob, True)
         super().__init__(input_size, output_size)
         if recurrent_type == "gru":
             RNN = torch.nn.GRU
@@ -382,7 +393,7 @@ class CPCLossNetwork(torch.nn.Module):
         prediction_steps: int = 12,
         negative_samples: int = 128,
         num_speakers: Optional[int] = None,
-        dropout_prob: float = 0.1,
+        dropout_prob: float = 0.0,
     ) -> None:
         check_positive("latent_size", latent_size)
         if context_size is None:
@@ -393,7 +404,7 @@ class CPCLossNetwork(torch.nn.Module):
         check_positive("negative_samples", negative_samples)
         if num_speakers is not None:
             check_positive("num_speakers", num_speakers)
-        check_positive("dropout_prob", dropout_prob)
+        check_positive("dropout_prob", dropout_prob, True)
         super().__init__()
         self.negative_samples = negative_samples
         self.prediction_steps = prediction_steps

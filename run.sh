@@ -1,138 +1,271 @@
 #! /usr/bin/env bash
-
-data="${1:-data}"
-exp="${2:-exp}"
-model="${3:-cpc.20480}"
-LIBRISPEECH_DIR="$3"
-
-I=1
-dl="$data/librispeech"
-dz="$data/zerospeech"
-pdl="$exp/$model/predict/librispeech"
-zs="$exp/$model/zrc"
-export APP_DIR="$dz/local/data"
+#SBATCH --job-name=scpc-run
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
+#SBATCH --ntasks=1
+#SBATCH --nodes=1
+#SBATCH --output=exp/slurm_logs/%j.out
 
 set -e
 
-if [ -z "$LIBRISPEECH_DIR" ] &&  [ ! -f "$dl/.complete.2" ]; then
-    # Download librispeech and turn into (raw) tensors.
-    LIBRISPEECH_DIR="$dl/local/data"
-    if [ ! -f "$LIBRISPEECH_DIR/.complete" ]; then
+source scripts/utils.sh
+
+usage () {
+    local ret="${1:-1}"
+    echo -e "Usage: $0 [-${HLP_FLG}|${OLY_FLG}] [-$DAT_FLG DIR] [-$EXP_FLG DIR] [-$MDL_FLG MDL] [-$VER_FLG I] [-$PRC_FLG N] [-$LIB_FLG DIR]"
+    if ((ret == 0)); then
+        IFS=','
+        cat << EOF 1>&2
+Options
+ -$HLP_FLG                 Display this message and exit
+ -$OLY_FLG                 Perform only one step and return
+ -$DAT_FLG DIR             Root data directory (default: $data)
+ -$EXP_FLG DIR             Root experiment directory (defalt: $exp)
+ -$MDL_FLG {${!MDL2FT[*]}}     Model to train (default: $model)
+ -$VER_FLG I               Non-negative integer version number (default: $ver)
+ -$PRC_FLG N               Number of threads to spawn in bash pipes
+                    (default: $p)
+ -$LIB_FLG DIR             Directory of where librispeech has been
+                    downloaded (default: downloads into
+                    $data/librispeech/local/data)
+EOF
+    fi
+    exit "${1:-1}"
+}
+
+# constants
+HLP_FLG=h
+OLY_FLG=o
+DAT_FLG=d
+EXP_FLG=e
+MDL_FLG=m
+VER_FLG=v
+PRC_FLG=p
+LIB_FLG=l
+declare -A MDL2FT=(
+    [fbank-p14]="fbank"
+    [cpc.deft]="raw"
+    [cpc.20480]="raw"
+)
+declare -A FT2ARGS=(
+    [raw]="--raw"
+    [fbank]=""
+)
+declare -A FT2PAD=(
+    [raw]="399"
+    [fbank]="0"
+)
+declare -A FT2DENOM=(
+    [raw]="16000"
+    [fbank]="100"
+)
+
+# variables
+data="data"
+exp="exp"
+model="cpc.deft"
+libri=
+ver=0
+nproc=1
+only=0
+
+while getopts "${HLP_FLG}${OLY_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${LIB_FLG}:" opt; do
+    case $opt in
+        ${HLP_FLG})
+            usage 0
+            ;;
+        ${OLY_FLG})
+            only=1
+            ;;
+        ${DAT_FLG})
+            argcheck_is_writable $opt "$OPTARG"
+            data="$OPTARG"
+            ;;
+        ${EXP_FLG})
+            argcheck_is_writable $opt "$OPTARG"
+            exp="$OPTARG"
+            ;;
+        ${MDL_FLG})
+            argcheck_is_a_choice $opt "${!MDL2FT[@]}" "$OPTARG"
+            model="$OPTARG"
+            ;;
+        ${VER_FLG})
+            argcheck_is_nnint $opt "$OPTARG"
+            ver="$OPTARG"
+            ;;
+        ${PRC_FLAG})
+            argcheck_is_nat $opt "$OPTARG"
+            nproc="$OPTARG"
+            ;;
+        ${LIB_FLG})
+            argcheck_is_readable $opt "$OPTARG"
+            libri="$OPTARG"
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+ft="${MDL2FT[$model]}"
+dl="$data/librispeech"
+dlf="$data/librispeech/$ft"
+dz="$data/zerospeech"
+em="$exp/$model/version_$ver"
+pdl="$em/predict/librispeech"
+zs="$em/zrc/librispeech"
+
+# for zerospeech-benchmarks pkg
+export APP_DIR="$dz/local/data"
+export TEMP_DIR="$TMPDIR"
+
+# download librispeech if necessary
+if [ -z "$libri" ] &&  [ ! -f "$dl/.complete" ]; then
+    # n.b. don't need to know where librispeech is if already done init_word
+    libri="$dl/local/data"
+    if [ ! -f "$libri/.complete" ]; then
+        # Download librispeech
         python prep/librispeech.py "$dl" download
-        touch "$LIBRISPEECH_DIR/.complete"
+        touch "$libri/.complete"
+        ((only)) && exit 0
     fi
 fi
-if [ ! -f "$dl/.complete.1" ]; then
+
+# download abxLS-dataset
+if [ ! -f "$dz/.complete" ]; then
+    # FIXME(sdrobert): this is entirely redundant. the files are the same
+    # as the librispeech dev/test partitions, just fewer of them and of WAV
+    # format.
+    zrc datasets:pull abxLS-dataset
+    touch "$dz/.complete"
+    ((only)) && exit 0
+fi
+
+# initial prep of dataset
+if [ ! -f "$dl/.complete" ]; then
     python prep/librispeech.py data/librispeech preamble \
-        --speakers-are-readers --exclude-subsets "$LIBRISPEECH_DIR"
-    python prep/librispeech.py data/librispeech init_word "$LIBRISPEECH_DIR"
-    touch "$dl/.complete.1"
+        --speakers-are-readers --exclude-subsets "$libri"
+    python prep/librispeech.py data/librispeech init_word "$libri"
+    touch "$dl/.complete"
+    ((only)) && exit 0
 fi
-if [ ! -f "$dl/.complete.2" ]; then
-    python prep/librispeech.py data/librispeech torch_dir wrd raw --raw
-    touch "$dl/.complete.2"
+
+# compute features and store in feat/ subdir
+if [ ! -f "$dlf/.complete" ]; then
+    python prep/librispeech.py \
+        data/librispeech torch_dir wrd $ft ${FT2ARGS[$ft]} --compute-up-to=100
+    touch "$dlf/.complete"
+    ((only)) && exit 0
 fi
-if [ ! -f "$dl/.complete.3" ]; then
-    # convert 10ms frame alignments to sample alignments and store the results
-    # in train_clean_100/ali
-    #
-    # N.B. --snip-edges=true for kaldi, which means frames = (samps - 400) //
-    #   160 + 1, or samps <= 160 * (frames - 1) + 400
-    #
-    # since the first frame starts at sample 0, the extra 240 to 399 samples
-    # are at the end of the recording. We thus use the alignment of the final
-    # frame for an additional 399 frames, then crop using
-    # get-torch-spect-data-dir-info.
-    for i in $(seq 1 $I); do
-        rm -f "$dl/.complete.3-$i"
+
+# put phone alignments into ali/ subdir
+if [ ! -f "$dlf/train_clean_100/ali/.complete" ]; then
+    rm -f "$dlf/train_clean_100/ali/.complete-"*
+    if [ "$ft" = "raw" ]; then
+        # convert 10ms frame alignments to sample alignments and store the
+        # results in train_clean_100/ali
+        #
+        # N.B. --snip-edges=true for kaldi, which means frames = (samps -
+        #   400) // 160 + 1, or samps <= 160 * (frames - 1) + 400
+        #
+        # since the first frame starts at sample 0, the extra 240 to 399
+        # samples are at the end of the recording. We thus use the alignment of
+        # the final frame for an additional 399 frames, then crop using
+        # get-torch-spect-data-dir-info.
+        align2frames() {
+            awk -v spf=160 -v pad=${FT2PAD[$ft]} -v i=$i -v I=$nproc '
+(NR + i - 2) % I == 0 {
+printf "lbi-%s", $1;
+for (n=2; n <= NF; ++n) for (m=0; m < spf; ++m) printf " %s", $n;
+for (m=0; m < pad; ++m) printf " %s", $NF;
+printf "\n";
+}'
+        }
+    else
+        # if 10ms shift, pass on through
+        align2frames() { cat; }
+    fi
+    for i in $(seq 1 $nproc); do
         unzip -cq resources/converted_aligned_phones.zip | \
-            awk -v spf=160 -v pad=399 -v i=$i -v I=$I '
-        (NR + i - 2) % I == 0 {
-            printf "lbi-%s", $1;
-            for (n=2; n <= NF; ++n) for (m=0; m < spf; ++m) printf " %s", $n;
-            for (m=0; m < pad; ++m) printf " %s", $NF;
-            printf "\n";
-        }' | \
+            align2frames | \
             write-table-to-torch-dir \
                 -i iv -o long \
                 'ark,t,s,o,cs:-' \
-                "$dl/raw/train_clean_100/ali" && \
-            touch "$dl/.complete.3-$i" &
+                "$dlf/train_clean_100/ali" && \
+            touch "$dlf/train_clean_100/ali/.complete-$i" &
     done
     wait
-    for i in $(seq 1 $I); do
-        if [ ! -f "$dl/.complete.3-$i" ]; then
+    for i in $(seq 1 $nproc); do
+        if [ ! -f "$dlf/.complete-$i" ]; then
             echo -e "Process $i/$I failed!"
+            rm -f "$dlf/train_clean_100/ali/.complete-"*
             exit 1
         fi
     done
-    touch "$dl/.complete.3"
+    rm -f "$dlf/train_clean_100/ali/.complete-"*
+    touch "$dlf/train_clean_100/ali/.complete"
+    ((only)) && exit 0
 fi
 
-if [ ! -f "$dl/raw/ext/train_clean_100.info.ark" ]; then
-    # primarily used to fix the alignments which pad too many samples
-    get-torch-spect-data-dir-info --fix 399 \
-        "$dl/raw/"{train_clean_100,ext/train_clean_100.info.ark} || \
-    rm -f "$dl/raw/ext/train_clean_100.info.ark"
+# fix alignments and get info file
+if [ ! -f "$dlf/ext/train_clean_100.info.ark" ]; then
+    failed=0
+    get-torch-spect-data-dir-info --fix ${FT2PAD[$ft]} \
+        "$dlf/"{train_clean_100,ext/train_clean_100.info.ark} || failed=1
+    if ((falied)); then
+        rm -f "$dlf/ext/train_clean_100.info.ark"
+        exit 1
+    fi
+    ((only)) && exit 0
 fi
 
-if [ ! -f "$dl/.complete.4" ]; then
-    for x in train test; do
+# pull out the subsets of train_clean_100 used for training and testing
+for x in train test; do
+    if [ ! -f "$dlf/train_clean_100_${x}_subset/.complete" ]; then
         subset-torch-spect-data-dir \
-            "$dl/raw/train_clean_100"{,_${x}_subset} \
+            "$dlf/train_clean_100"{,_${x}_subset} \
             --utt-list-file resources/train_clean_100_${x}_subset.txt
-    done
-    touch "$dl/.complete.4"
-fi
+        touch "$dlf/train_clean_100_${x}_subset/.complete"
+        ((only)) && exit 0
+    fi
+done
 
-# This step doesn't need to be performed usually. The goal is to map
-# librispeech predictions to their zerospeech submission files. re-downloading
-# parts of librispeech is unnecessary
-# if [ ! -f "$dz/.complete" ]; then
-#     zrc datasets:pull abxLS-dataset
-#     find "$APP_DIR/datasets/abxLS-dataset" -name '*.wav' | \
-#         awk -F "/" '
-# {
-#     NFm1=NF-1;
-#     dn=$NFm1;
-#     gsub(/-/, "_", dn);
-#     split($NF, fn, ".");
-#     print dn"/lbi-"fn[1]".npy "$NFm1"/"fn[1]".npy"
-# }' > resources/libri_to_abxLS.map
-#     touch "$dz/.complete"
-# fi
-
-if [ ! -f "$exp/$model/version_0/best.pt" ]; then
+# train model
+if [ ! -f "$em/best.pt" ]; then
     scpc \
         --read-model-yaml "conf/model.$model.yaml" \
         fit \
-            --read-data-yaml conf/data.libri.raw.yaml \
+            --read-data-yaml "conf/data.libri.$ft.yaml" \
             @conf/trainer.args.txt \
-            "--train-dir=$dl/raw/train_clean_100_train_subset" \
-            "--val-dir=$dl/raw/train_clean_100_test_subset" \
-            "--default_root_dir=$exp"
+            "--train-dir=$dlf/train_clean_100_train_subset" \
+            "--val-dir=$dlf/train_clean_100_test_subset" \
+            "--default_root_dir=$exp" \
+            "--version=$ver"
+    ((only)) && exit 0
 fi
 
+# compute predictions
 for x in dev_clean dev_other test_clean test_other; do
-    # compute predictions
     if [ ! -f "$pdl/$x/.complete" ]; then
         mkdir -p "$pdl/$x"
         scpc \
             --read-model-yaml "conf/model.$model.yaml" \
             predict --numpy --device=cuda \
-            "$exp/$model/version_0/best.pt" "$dl/raw/$x" "$pdl/$x"
+            "$em/best.pt" "$dlf/$x" "$pdl/$x"
+        rm -f "$em/"*.ckpt
         touch "$pdl/$x/.complete"
+        ((only)) && exit 0
     fi
 done
 
-if [ ! -f "$zs/.complete.1" ]; then
-    # set up zerospeech abxLS submission
+# set up zerospeech abxLS submission
+if [ ! -f "$zs/.complete" ]; then
     rm -rf "$zs"
     zrc submission:init abxLS "$zs"
     scpc --read-model-yaml "conf/model.$model.yaml" info | \
-        awk '
+        awk -v denom=${FT2DENOM[$ft]} '
 BEGIN {spf=0}
-NR == FNR && $1 == "downsampling_factor" {spf=$2 / 16000}
+NR == FNR && $1 == "downsampling_factor" {spf=$2 / denom}
 NR != FNR {if ($1 == "feature_size:") $2=spf; print}' \
             - conf/params.template.yaml > "$zs/params.yaml"
     awk '
@@ -141,12 +274,15 @@ NR == FNR && $1 == "system_description:" {$1=""; split($0, x, "#"); sd=x[1]}
 NR != FNR {if ($1 == "system_description:") $2=sd; print}
 ' conf/{model.$model.yaml,meta.template.yaml} > "$zs/meta.yaml"
     awk -v "di=$pdl/" -v "do_=$zs/" '{$1="\""di$1"\""; $2="\""do_$2"\""; print}' \
-        resources/libri_to_abxLS.map | xargs -P $I -I{} sh -c 'cp -f {}'
-    touch "$zs/.complete.1"
+        resources/libri_to_abxLS.map | xargs -P $nproc -I{} sh -c 'cp -f {}'
+    touch "$zs/.complete"
+    find "$pdl" -name '*.npy' -delete  # we don't need these anymore
+    ((only)) && exit 0
 fi
 
-if [ ! -f "$zs/.complete.2" ]; then
-    # score zerospeech abxLS submission
+# score zerospeech abxLS submission
+if [ ! -f "$zs/scores/.complete" ]; then
     zrc benchmarks:run abxLS "$zs"
-    touch "$zs/.complete.2"
+    touch "$zs/scores/.complete"
+    ((only)) && exit 0
 fi

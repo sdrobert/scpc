@@ -38,13 +38,14 @@ __all__ = [
 class ConvEncoderParams(param.Parameterized):
 
     output_size: int = param.Integer(
-        256, bounds=(1, None), doc="Size of output (and # of conv output channels)"
+        512, bounds=(1, None), doc="Size of output (and # of conv output channels)"
     )
-    channel_norm_eps: float = param.Number(
-        1e-5,
-        bounds=(0, None),
-        inclusive_bounds=(False, True),
-        doc="Minimum denominator value in channel norm",
+    norm_style: Literal["none", "batch" "channel", "instance"] = param.ObjectSelector(
+        "none",
+        ["none", "batch", "channel", "instance"],
+        doc="Intermediate layer norm to apply. 'none' is none. 'batch' normalizes over"
+        "batch elements; 'channel' normalizes over channels; 'instance' normalizes "
+        "over samples",
     )
 
 
@@ -56,12 +57,6 @@ class SelfAttentionEncoderParams(param.Parameterized):
     num_heads: int = param.Integer(1, bounds=(1, None), doc="Number of attention heads")
     dim_feedforward: int = param.Integer(
         1, bounds=(1, None), doc="Size of intermediate representation"
-    )
-    layer_norm_eps: float = param.Number(
-        1e-5,
-        bounds=(0, None),
-        inclusive_bounds=(False, True),
-        doc="Minimum denominator value in layer norm",
     )
 
 
@@ -143,6 +138,15 @@ class ChunkingParams(param.Parameterized):
         0.0, doc="Value to pad with when pad_mode is 'constant'"
     )
 
+    max_chunks: Optional[int] = param.Integer(
+        8,
+        allow_None=True,
+        bounds=(1, None),
+        doc="Maximum number of chunks per batch. If the total number of extracted "
+        "chunks exceeds this number, a random assortment of them is kept. If unset, "
+        "no maximum is set",
+    )
+
 
 class TrainingParams(param.Parameterized):
 
@@ -152,7 +156,7 @@ class TrainingParams(param.Parameterized):
     learning_rate: float = param.Number(
         2e-4, bounds=(0, None), inclusive_bounds=(False, True), doc="Learning rate"
     )
-    dropout_prob: float = param.Magnitude(0.1, doc="Probability of dropping out a unit")
+    dropout_prob: float = param.Magnitude(0.0, doc="Probability of dropping out a unit")
 
     chunking: ChunkingParams = param.ClassSelector(
         ChunkingParams, instantiate=False, doc="Parameters for chunking"
@@ -191,7 +195,7 @@ class PretrainedFrontendParams(param.Parameterized):
         "convolutional; 'id' is identity (noop)",
     )
     context_type: Literal["csa", "sa", "recur", "id"] = param.ObjectSelector(
-        "csa",
+        "recur",
         ["csa", "sa", "recur", "id"],
         doc="Which encoder to use for the 'context' part of the model. 'csa' is "
         "causal self-atttention; 'sa' is self-attention (non-causal); 'recur' is "
@@ -284,7 +288,7 @@ class PretrainedFrontend(pl.LightningModule):
             self.latent = ConvEncoder(
                 params.input_size,
                 params.conv.output_size,
-                params.conv.channel_norm_eps,
+                params.conv.norm_style,
                 params.training.dropout_prob,
             )
         elif params.latent_type == "id":
@@ -299,7 +303,6 @@ class PretrainedFrontend(pl.LightningModule):
                 params.csa.num_layers,
                 params.csa.num_heads,
                 params.csa.dim_feedforward,
-                params.csa.layer_norm_eps,
                 params.training.dropout_prob,
                 params.training.chunking.policy != "fixed",
             )
@@ -309,7 +312,6 @@ class PretrainedFrontend(pl.LightningModule):
                 params.sa.num_layers,
                 params.sa.num_heads,
                 params.sa.dim_feedforward,
-                params.sa.layer_norm_eps,
                 params.training.dropout_prob,
                 params.training.chunking.policy != "fixed",
             )
@@ -448,10 +450,11 @@ class PretrainedFrontend(pl.LightningModule):
 
     def on_before_batch_transfer(self, batch: Batch, dataloader_idx: int) -> Batch:
         feats, alis, refs, feat_sizes, ref_sizes, utt_ids = batch
-        if self.params.training.chunking.policy != "none":
-            if self.params.training.chunking.policy == "fixed":
+        policy = self.params.training.chunking.policy
+        if policy != "none":
+            if policy == "fixed":
                 slices, sources = self.slicer(feats, feat_sizes)
-            elif self.params.training.chunking.policy == "ali":
+            elif policy == "ali":
                 if alis is None:
                     raise ValueError("chunking policy is 'ali' but alis is None")
                 slices, sources = self.slicer(alis, feat_sizes)
@@ -464,9 +467,14 @@ class PretrainedFrontend(pl.LightningModule):
             feats, feat_sizes = self.chunker(
                 feats[sources], slices, feat_sizes[sources]
             )
-            if self.training_is_fixed_width:
-                feat_sizes = None
             utt_ids = tuple(utt_ids[src] for src in sources)
+            max_chunks, N = self.params.training.chunking.max_chunks, feats.size(0)
+            if max_chunks is not None and max_chunks < N:
+                sources = torch.randperm(N)[:max_chunks]
+                utt_ids = tuple(utt_ids[src] for src in sources)
+                feats, feat_sizes = feats[sources], feat_sizes[sources]
+            if policy == "fixed":
+                feat_sizes = None
             del sources, slices
         return feats, None, None, feat_sizes, None, utt_ids
 

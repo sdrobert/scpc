@@ -1,0 +1,8 @@
+name: fbank
+system_description: "41-dim fbank baseline w/ 12 CPC prediction steps"
+input_size: 41
+latent_type: id
+context_type: id
+training:
+  chunking:
+    policy: none
