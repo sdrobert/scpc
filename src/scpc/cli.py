@@ -22,7 +22,7 @@ import torch
 import numpy as np
 import pytorch_lightning as pl
 
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, RichProgressBar
 from pytorch_lightning.loggers import TensorBoardLogger
 from pydrobert.torch.lightning import LitSpectDataModule
 from pydrobert.torch.data import SpectDataSet
@@ -58,6 +58,9 @@ def main(args: Optional[Sequence[str]] = None):
         print_format_str="--print-data-{file_format}",
     )
     pl.Trainer.add_argparse_args(fit_parser)
+    fit_parser.add_argument(
+        "--num-workers", type=int, default=None, help="Number of workers in datasets"
+    )
 
     predict_parser = subparsers.add_parser(
         "predict", help="Output hidden states of trained model"
@@ -99,6 +102,7 @@ def main(args: Optional[Sequence[str]] = None):
             batch_first=True,
             # shuffle=False,
             pin_memory=False,
+            num_workers=options.num_workers,
         )
         root_dir = options.default_root_dir
         if root_dir is None:
@@ -114,11 +118,14 @@ def main(args: Optional[Sequence[str]] = None):
             model_dir = os.path.join(model_dir, f"version_{options.version}")
         os.makedirs(model_dir, exist_ok=True)
         cc = ModelCheckpoint(model_dir, save_last=True)
+        callbacks = [cc]
+        if options.enable_progress_bar:
+            callbacks.append(RichProgressBar())
         logger_dir = os.path.join(root_dir, "tb_logs")
         os.makedirs(logger_dir, exist_ok=True)
         logger = TensorBoardLogger(logger_dir, model_name, options.version)
         trainer: pl.Trainer = pl.Trainer.from_argparse_args(
-            options, replace_sampler_ddp=False, callbacks=[cc], logger=logger
+            options, replace_sampler_ddp=False, callbacks=callbacks, logger=logger
         )
         trainer.fit(plm, data, ckpt_path="last")
         if not trainer.interrupted:

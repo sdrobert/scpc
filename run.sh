@@ -1,11 +1,3 @@
-#! /usr/bin/env bash
-#SBATCH --job-name=scpc-run
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=32G
-#SBATCH --ntasks=1
-#SBATCH --nodes=1
-#SBATCH --output=exp/slurm_logs/%j.out
-
 set -e
 
 source scripts/utils.sh
@@ -17,17 +9,18 @@ usage () {
         IFS=','
         cat << EOF 1>&2
 Options
- -$HLP_FLG                 Display this message and exit
- -$OLY_FLG                 Perform only one step and return
- -$DAT_FLG DIR             Root data directory (default: $data)
- -$EXP_FLG DIR             Root experiment directory (defalt: $exp)
- -$MDL_FLG {${!MDL2FT[*]}}     Model to train (default: $model)
- -$VER_FLG I               Non-negative integer version number (default: $ver)
- -$PRC_FLG N               Number of threads to spawn in bash pipes
+ -$HLP_FLG                  Display this message and exit
+ -$OLY_FLG                  Perform only one step and return
+ -$DAT_FLG DIR              Root data directory (default: $data)
+ -$EXP_FLG DIR              Root experiment directory (defalt: $exp)
+ -$MDL_FLG {${!MDL2FT[*]}}      Model to train (default: $model)
+ -$VER_FLG I                Non-negative integer version number (default: $ver)
+ -$PRC_FLG N                Number of threads to spawn in bash pipes
                     (default: $p)
- -$LIB_FLG DIR             Directory of where librispeech has been
-                    downloaded (default: downloads into
-                    $data/librispeech/local/data)
+ -$LIB_FLG DIR              Directory of where librispeech has been
+                     downloaded (default: downloads into
+                     $data/librispeech/local/data)
+ -$XTR_FLG ARGS             Extra args to pass to trainer in fit stage
 EOF
     fi
     exit "${1:-1}"
@@ -42,8 +35,9 @@ MDL_FLG=m
 VER_FLG=v
 PRC_FLG=p
 LIB_FLG=l
+XTR_FLG=x
 declare -A MDL2FT=(
-    [fbank-p14]="fbank"
+    [fbank-p12]="fbank"
     [cpc.deft]="raw"
     [cpc.20480]="raw"
 )
@@ -68,8 +62,9 @@ libri=
 ver=0
 nproc=1
 only=0
+xtra_args=
 
-while getopts "${HLP_FLG}${OLY_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${LIB_FLG}:" opt; do
+while getopts "${HLP_FLG}${OLY_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${LIB_FLG}:${XTR_FLG}:" opt; do
     case $opt in
         ${HLP_FLG})
             usage 0
@@ -93,13 +88,16 @@ while getopts "${HLP_FLG}${OLY_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:$
             argcheck_is_nnint $opt "$OPTARG"
             ver="$OPTARG"
             ;;
-        ${PRC_FLAG})
+        ${PRC_FLG})
             argcheck_is_nat $opt "$OPTARG"
             nproc="$OPTARG"
             ;;
         ${LIB_FLG})
             argcheck_is_readable $opt "$OPTARG"
             libri="$OPTARG"
+            ;;
+        ${XTR_FLG})
+            xtra_args="$OPTARG"
             ;;
         *)
             usage
@@ -182,8 +180,9 @@ printf "\n";
 }'
         }
     else
-        # if 10ms shift, pass on through
-        align2frames() { cat; }
+        align2frames() {
+            awk -v i=$i -v I=$nproc '(NR + i - 2) % I == 0 {print;}'
+        }
     fi
     for i in $(seq 1 $nproc); do
         unzip -cq resources/converted_aligned_phones.zip | \
@@ -196,7 +195,7 @@ printf "\n";
     done
     wait
     for i in $(seq 1 $nproc); do
-        if [ ! -f "$dlf/.complete-$i" ]; then
+        if [ ! -f "$dlf/train_clean_100/ali/.complete-$i" ]; then
             echo -e "Process $i/$I failed!"
             rm -f "$dlf/train_clean_100/ali/.complete-"*
             exit 1
@@ -240,7 +239,8 @@ if [ ! -f "$em/best.pt" ]; then
             "--train-dir=$dlf/train_clean_100_train_subset" \
             "--val-dir=$dlf/train_clean_100_test_subset" \
             "--default_root_dir=$exp" \
-            "--version=$ver"
+            "--version=$ver" $xtra_args
+    [ -f "$em/best.pt" ] || exit 1
     ((only)) && exit 0
 fi
 
@@ -252,7 +252,6 @@ for x in dev_clean dev_other test_clean test_other; do
             --read-model-yaml "conf/model.$model.yaml" \
             predict --numpy --device=cuda \
             "$em/best.pt" "$dlf/$x" "$pdl/$x"
-        rm -f "$em/"*.ckpt
         touch "$pdl/$x/.complete"
         ((only)) && exit 0
     fi
