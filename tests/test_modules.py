@@ -8,18 +8,20 @@ from scpc.modules import *
 @pytest.mark.parametrize(
     "Encoder",
     [
-        IdentityEncoder,
-        ConvEncoder,
-        SelfAttentionEncoder,
         CausalSelfAttentionEncoder,
+        ConvEncoder,
+        FeedForwardEncoder,
+        IdentityEncoder,
         RecurrentEncoder,
+        SelfAttentionEncoder,
     ],
     ids=[
-        "IdentityEncoder",
-        "ConvEncoder",
-        "SelfAttentionEncoder",
         "CausalSelfAttentionEncoder",
+        "ConvEncoder",
+        "FeedForwardEncoder",
+        "IdentityEncoder",
         "RecurrentEncoder",
+        "SelfAttentionEncoder",
     ],
 )
 def test_encoder_variable_batches(Encoder: Type[Encoder]):
@@ -53,7 +55,7 @@ def test_causal_self_attention_encoder_is_causal():
     torch.manual_seed(1)
     N, T, H = 3, 13, 17
     x = torch.rand(N, T, H)
-    encoder = CausalSelfAttentionEncoder(H, T // 2 - 1, num_heads=1)
+    encoder = CausalSelfAttentionEncoder(H, 2 * H, T // 2 - 1, num_heads=1)
     encoder.eval()
     x1 = encoder(x)[0][:, : T // 2]
     x2 = encoder(x[:, : T // 2])[0]
@@ -68,7 +70,8 @@ def test_causal_self_attention_encoder_is_causal():
 @pytest.mark.parametrize(
     "embedding", [True, False], ids=["w/-embedding", "w/o-embedding"]
 )
-def test_cpc_prediction_network_matches_manual_comp(embedding):
+@pytest.mark.parametrize("penc", ["ff", "recur", "csa"])
+def test_cpc_prediction_network_matches_manual_comp(embedding, penc):
     torch.manual_seed(2)
     N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 100
     lens = torch.randint(K + 1, T + 1, (N,))
@@ -79,7 +82,14 @@ def test_cpc_prediction_network_matches_manual_comp(embedding):
     latent_samp = latent[samp].view(N, T - 1, M, Cl)
     speakers = torch.randint(N, (N,))
 
-    net = CPCLossNetwork(Cl, Cc, K, M, N if embedding else None)
+    if penc == "ff":
+        penc = None
+    elif penc == "csa":
+        penc = CausalSelfAttentionEncoder(Cc, Cl * K, num_heads=1)
+    else:
+        penc = RecurrentEncoder(Cc, Cl * K)
+
+    net = CPCLossNetwork(Cl, Cc, K, M, penc, N if embedding else None)
     net.eval()
 
     loss_exp, latents_ = 0.0, []
@@ -93,7 +103,7 @@ def test_cpc_prediction_network_matches_manual_comp(embedding):
         if embedding:
             context_n = context_n + net.embed(speakers[n : n + 1])
         latent_samp_n = latent_samp[n]
-        Az_n = net.ff(context_n)
+        Az_n = net.prediction_encoder(context_n.unsqueeze(0))[0].squeeze(0)
         assert Az_n.shape == (lens_n, Cl * K)
         Az_n = Az_n.view(lens_n, K, Cl).transpose(0, 1)
         for k in range(1, K + 1):

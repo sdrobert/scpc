@@ -1,2 +1,11 @@
 name: cpc.deft
 system_description: "CPC resembling van der Ooord et al. 2019"
+training:
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+  chunking:
+    max_chunks: 16

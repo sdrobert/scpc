@@ -25,13 +25,24 @@ import numpy as np
 import pytorch_lightning as pl
 import pydrobert.param.argparse as pargparse
 
+from pydrobert.torch.lightning import LitSpectDataModuleParams
 from pydrobert.torch.modules import ChunkBySlices, SliceSpectData
 
 from .modules import *
 
 __all__ = [
-    "PretrainedFrontend",
-    "PretrainedFrontendParams",
+    "CausalSelfAttentionEncoderParams",
+    "ChunkingParams",
+    "ConvEncoderParams",
+    "CPCLossParams",
+    "FeedForwardEncoderParams",
+    "Model",
+    "LightningPretrainedFrontend",
+    "LightningPretrainedFrontend",
+    "LightningPretrainedFrontendParams",
+    "RecurrentEncoderParams",
+    "SelfAttentionEncoderParams",
+    "TrainingParams",
 ]
 
 
@@ -40,13 +51,24 @@ class ConvEncoderParams(param.Parameterized):
     output_size: int = param.Integer(
         512, bounds=(1, None), doc="Size of output (and # of conv output channels)"
     )
-    norm_style: Literal["none", "batch" "channel", "instance"] = param.ObjectSelector(
+    norm_type: Literal["none", "batch" "channel", "instance"] = param.ObjectSelector(
         "none",
         ["none", "batch", "channel", "instance"],
         doc="Intermediate layer norm to apply. 'none' is none. 'batch' normalizes over"
         "batch elements; 'channel' normalizes over channels; 'instance' normalizes "
         "over samples",
     )
+
+
+class FeedForwardEncoderParams(param.Parameterized):
+
+    output_size: int = param.Integer(256, bounds=(1, None), doc="Size of the output")
+    nonlin: Literal["relu", "sigmoid", "tanh", "none"] = param.ObjectSelector(
+        "relu",
+        ["relu", "sigmoid", "tanh", "none"],
+        doc="Type of nonlinearity to apply after linear transform",
+    )
+    bias: bool = param.Boolean(True, doc="Whether to use a bias vector")
 
 
 class SelfAttentionEncoderParams(param.Parameterized):
@@ -101,6 +123,13 @@ class CPCLossParams(param.Parameterized):
         doc="Regular expression to extract speaker id from utterance id. Must contain "
         "one group to be used as the speaker id",
     )
+    prediction_type: Literal["ff", "recur", "csa"] = param.ObjectSelector(
+        "ff",
+        ["ff", "recur", "csa"],
+        doc="Type of prediction network to use. 'ff' is "
+        "a matrix (original); 'recur' is a single-layer LSTM; 'csa' is a causal "
+        "transformer",
+    )
 
 
 class ChunkingParams(param.Parameterized):
@@ -150,6 +179,10 @@ class ChunkingParams(param.Parameterized):
 
 class TrainingParams(param.Parameterized):
 
+    data: Optional[LitSpectDataModuleParams] = param.ClassSelector(
+        LitSpectDataModuleParams, instantiate=False, doc="Data parameters"
+    )
+
     optimizer: Literal["adam", "sgd"] = param.ObjectSelector(
         "adam", ["adam", "sgd"], doc="Optimizer class"
     )
@@ -158,27 +191,35 @@ class TrainingParams(param.Parameterized):
     )
     dropout_prob: float = param.Magnitude(0.0, doc="Probability of dropping out a unit")
 
-    chunking: ChunkingParams = param.ClassSelector(
+    chunking: Optional[ChunkingParams] = param.ClassSelector(
         ChunkingParams, instantiate=False, doc="Parameters for chunking"
     )
 
     loss_type: Literal["cpc"] = param.ObjectSelector(
         "cpc", ["cpc"], doc="Loss to train model with"
     )
-    cpc_loss: CPCLossParams = param.ClassSelector(
+    cpc_loss: Optional[CPCLossParams] = param.ClassSelector(
         CPCLossParams,
         instantiate=False,
         doc="Parameters for CPC loss (if loss_type = 'cpc')",
     )
 
+    batch_size: int = param.Integer(1, bounds=(1, None), doc="Size of")
+
     def initialize_missing(self):
+        if self.data is None:
+            self.data = LitSpectDataModuleParams(name="data")
+            self.data.prefer_split = False
+            self.data.initialize_missing()
+            self.data.train_params.batch_size = 1
+            self.data.train_params.drop_last = True
         if self.chunking is None:
             self.chunking = ChunkingParams(name="chunking")
         if self.cpc_loss is None:
             self.cpc_loss = CPCLossParams(name="cpc_loss")
 
 
-class PretrainedFrontendParams(param.Parameterized):
+class LightningPretrainedFrontendParams(param.Parameterized):
 
     system_description: str = param.String(
         "", doc="Description of the system for ZRC submission"
@@ -188,11 +229,11 @@ class PretrainedFrontendParams(param.Parameterized):
         1, bounds=(1, None), doc="Size of input feature dimension (1 for raw)"
     )
 
-    latent_type: Literal["conv", "id"] = param.ObjectSelector(
+    latent_type: Literal["conv", "ff", "id"] = param.ObjectSelector(
         "conv",
-        ["conv", "id"],
+        ["conv", "ff", "id"],
         doc="Which encoder to use for the 'latent' part of the model. 'conv' is "
-        "convolutional; 'id' is identity (noop)",
+        "convolutional; 'ff' is feed-forward; 'id' is identity (noop)",
     )
     context_type: Literal["csa", "sa", "recur", "id"] = param.ObjectSelector(
         "recur",
@@ -202,35 +243,42 @@ class PretrainedFrontendParams(param.Parameterized):
         "recurrent; 'id' is identity (noop)",
     )
 
-    conv: ConvEncoderParams = param.ClassSelector(
+    conv: Optional[ConvEncoderParams] = param.ClassSelector(
         ConvEncoderParams,
         instantiate=False,
         doc="Parameters for latent convolutional encoder (if latent_type = 'conv')",
     )
-    csa: CausalSelfAttentionEncoderParams = param.ClassSelector(
+    ff: Optional[FeedForwardEncoderParams] = param.ClassSelector(
+        FeedForwardEncoderParams,
+        instantiate=False,
+        doc="Parameters for latent feed-forward encoder (if latent_type = 'ff')",
+    )
+    csa: Optional[CausalSelfAttentionEncoderParams] = param.ClassSelector(
         CausalSelfAttentionEncoderParams,
         instantiate=False,
         doc="Parameters for context causal self-attention encoder "
         "(if context_type = 'csa')",
     )
-    sa: SelfAttentionEncoderParams = param.ClassSelector(
+    sa: Optional[SelfAttentionEncoderParams] = param.ClassSelector(
         SelfAttentionEncoderParams,
         instantiate=False,
         doc="Parameters for context self-attention encoder (if context_type = 'sa')",
     )
-    recur: RecurrentEncoderParams = param.ClassSelector(
+    recur: Optional[RecurrentEncoderParams] = param.ClassSelector(
         RecurrentEncoderParams,
         instantiate=False,
         doc="Parameters for context recurrent encoder (if context_type = 'recur')",
     )
 
-    training: TrainingParams = param.ClassSelector(
+    training: Optional[TrainingParams] = param.ClassSelector(
         TrainingParams, instantiate=False, doc="Parameters for training"
     )
 
     def initialize_missing(self):
         if self.conv is None:
             self.conv = ConvEncoderParams(name="conv")
+        if self.ff is None:
+            self.ff = FeedForwardEncoderParams(name="ff")
         if self.csa is None:
             self.csa = CausalSelfAttentionEncoderParams(name="csa")
         if self.sa is None:
@@ -252,7 +300,7 @@ Batch = Tuple[
 ]
 
 
-class Model(torch.nn.Module):
+class PretrainedFrontend(torch.nn.Module):
     def __init__(self, latent: Encoder, context: Encoder) -> None:
         super().__init__()
         self.latent = latent
@@ -266,9 +314,9 @@ class Model(torch.nn.Module):
         return x, lens
 
 
-class PretrainedFrontend(pl.LightningModule):
+class LightningPretrainedFrontend(pl.LightningModule):
 
-    params: PretrainedFrontendParams
+    params: LightningPretrainedFrontendParams
     latent: Encoder
     context: Encoder
     slicer: Optional[SliceSpectData]
@@ -278,17 +326,34 @@ class PretrainedFrontend(pl.LightningModule):
     _speaker_map: Dict[str, int]
     _speaker_min: int
 
-    def __init__(self, params: PretrainedFrontendParams) -> None:
+    def __init__(self, params: LightningPretrainedFrontendParams) -> None:
         super().__init__()
         self.params = params
         self._speaker_map = dict()
         self._speaker_min = -1
 
+        if params.training is None:
+            raise ValueError("params.training not initialized")
+        if params.training.chunking is None:
+            raise ValueError("params.training.chunking not initialized")
+
         if params.latent_type == "conv":
+            if params.conv is None:
+                raise ValueError("params.conv not initialized")
             self.latent = ConvEncoder(
                 params.input_size,
                 params.conv.output_size,
-                params.conv.norm_style,
+                params.conv.norm_type,
+                params.training.dropout_prob,
+            )
+        elif params.latent_type == "ff":
+            if params.ff is None:
+                raise ValueError("params.ff not initialized")
+            self.latent = FeedForwardEncoder(
+                params.input_size,
+                params.ff.output_size,
+                params.ff.nonlin,
+                params.ff.bias,
                 params.training.dropout_prob,
             )
         elif params.latent_type == "id":
@@ -297,8 +362,11 @@ class PretrainedFrontend(pl.LightningModule):
             raise NotImplementedError
 
         if params.context_type == "csa":
+            if params.csa is None:
+                raise ValueError("params.csa not initialized")
             self.context = CausalSelfAttentionEncoder(
                 self.latent.output_size,
+                None,
                 params.csa.max_width,
                 params.csa.num_layers,
                 params.csa.num_heads,
@@ -307,6 +375,8 @@ class PretrainedFrontend(pl.LightningModule):
                 params.training.chunking.policy != "fixed",
             )
         elif params.context_type == "sa":
+            if params.sa is None:
+                raise ValueError("params.sa not initialized")
             self.context = SelfAttentionEncoder(
                 self.latent.output_size,
                 params.sa.num_layers,
@@ -316,6 +386,8 @@ class PretrainedFrontend(pl.LightningModule):
                 params.training.chunking.policy != "fixed",
             )
         elif params.context_type == "recur":
+            if params.recur is None:
+                raise ValueError("params.recur not initialized")
             self.context = RecurrentEncoder(
                 self.latent.output_size,
                 params.recur.output_size,
@@ -329,6 +401,8 @@ class PretrainedFrontend(pl.LightningModule):
             raise NotImplementedError
 
         if params.training.loss_type == "cpc":
+            if params.training.cpc_loss is None:
+                raise ValueError("params.training.cpc_loss not initialized")
             num_speakers = params.training.cpc_loss.num_speakers
             if num_speakers is not None:
                 self._speaker_regex = re.compile(params.training.cpc_loss.speaker_regex)
@@ -339,13 +413,34 @@ class PretrainedFrontend(pl.LightningModule):
                     )
             else:
                 self._speaker_regex = None
+            if params.training.cpc_loss.prediction_type == "csa":
+                penc = CausalSelfAttentionEncoder(
+                    self.context.output_size,
+                    params.training.cpc_loss.prediction_steps * self.latent.output_size,
+                    dropout_prob=params.training.dropout_prob,
+                )
+            elif params.training.cpc_loss.prediction_type == "recur":
+                penc = RecurrentEncoder(
+                    self.context.output_size,
+                    params.training.cpc_loss.prediction_steps * self.latent.output_size,
+                    recurrent_type="lstm",
+                    dropout_prob=params.training.dropout_prob,
+                )
+            else:
+                penc = FeedForwardEncoder(
+                    self.context.output_size,
+                    params.training.cpc_loss.prediction_steps * self.latent.output_size,
+                    "none",
+                    False,
+                    params.training.dropout_prob,
+                )
             self.cpc_loss = CPCLossNetwork(
                 self.latent.output_size,
                 self.context.output_size,
                 params.training.cpc_loss.prediction_steps,
                 params.training.cpc_loss.negative_samples,
+                penc,
                 num_speakers,
-                params.training.dropout_prob,
             )
         else:
             raise NotImplementedError
@@ -399,8 +494,8 @@ class PretrainedFrontend(pl.LightningModule):
     def num_total_parameters(self) -> int:
         return self._num_params(self.parameters())
 
-    def get_model(self) -> Model:
-        return Model(self.latent, self.context)
+    def get_inference_model(self) -> PretrainedFrontend:
+        return PretrainedFrontend(self.latent, self.context)
 
     def get_speakers_from_uttids(self, utt_ids: Tuple[str, ...]) -> torch.Tensor:
         speakers = torch.empty(len(utt_ids), dtype=torch.long)
@@ -481,7 +576,7 @@ class PretrainedFrontend(pl.LightningModule):
     def forward(
         self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        return self.model.forward(feats, feat_lens)
+        return self.get_inference_model().forward(feats, feat_lens)
 
     def predict_step(
         self, batch: Batch, batch_idx: int
@@ -505,7 +600,7 @@ class PretrainedFrontend(pl.LightningModule):
         read_format_str: str = "--read-model-{file_format}",
         print_format_str: Optional[str] = None,
     ):
-        params = PretrainedFrontendParams(name="model_params")
+        params = LightningPretrainedFrontendParams(name="model_params")
         params.initialize_missing()
 
         if print_format_str is not None:

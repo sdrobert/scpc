@@ -1,0 +1,17 @@
+name: cpc.small
+system_description: "CPC-small network"
+conv:
+  output_size: 256
+  norm_type: channel
+recur:
+  num_layers: 2
+  recurrent_type: lstm
+training:
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+  chunking:
+    max_chunks: 16

@@ -16,7 +16,17 @@
 # limitations under the License.
 
 import abc
-from typing import Collection, Literal, Optional, Tuple
+from typing import (
+    Any,
+    Collection,
+    Generic,
+    Literal,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    overload,
+)
 
 import torch
 
@@ -25,6 +35,7 @@ __all__ = [
     "ConvEncoder",
     "CPCLossNetwork",
     "Encoder",
+    "FeedForwardEncoder",
     "IdentityEncoder",
     "RecurrentEncoder",
     "SelfAttentionEncoder",
@@ -55,6 +66,21 @@ def check_in(name: str, val: str, choices: Collection[str]):
     if val not in choices:
         choices = "', '".join(sorted(choices))
         raise ValueError(f"Expected {name} to be one of '{choices}'; got '{val}'")
+
+
+T = TypeVar("T")
+
+
+def check_is_instance(name: str, val: T, cls: Type[T]):
+    if not isinstance(val, cls):
+        raise ValueError(
+            f"Expected {name} to be a '{cls.__name__}'; got '{type(val).__name__}'"
+        )
+
+
+def check_equals(name: str, val: Any, other: Any):
+    if val != other:
+        raise ValueError(f"Expected {name} to be equal to '{other}'; got '{val}'")
 
 
 class MaskingLayer(torch.nn.Module):
@@ -174,17 +200,52 @@ class IdentityEncoder(Encoder):
         return x, lens
 
 
+class FeedForwardEncoder(Encoder):
+    def __init__(
+        self,
+        input_size: int,
+        output_size: Optional[int] = None,
+        nonlin: Literal["relu", "sigmoid", "tanh", "none"] = "relu",
+        bias: bool = True,
+        dropout_prob: float = 0.0,
+    ) -> None:
+        check_positive("dropout_prob", dropout_prob, True)
+        check_in("nonlin", nonlin, {"relu", "sigmoid", "tanh", "none"})
+        super().__init__(input_size, output_size)
+        self.ff = torch.nn.Linear(self.input_size, self.output_size, bias)
+        self.drop = torch.nn.Dropout(dropout_prob)
+        if nonlin == "relu":
+            self.nonlin = torch.nn.ReLU()
+        elif nonlin == "sigmoid":
+            self.nonlin = torch.nn.Sigmoid()
+        elif nonlin == "tanh":
+            self.nonlin = torch.nn.Tanh()
+        else:
+            self.nonlin = torch.nn.Identity()
+
+    @property
+    def downsampling_factor(self) -> int:
+        return 1
+
+    def encode(
+        self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        x = self.nonlin(self.ff(self.drop(x)))
+        return x, lens
+
+
 class ConvEncoder(Encoder):
     def __init__(
         self,
         input_size: int,
-        output_size: int = 256,
+        output_size: Optional[int] = None,
         norm_style: Literal["none", "batch", "instance", "channel"] = "none",
         dropout_prob: float = 0.0,
     ) -> None:
         check_positive("dropout_prob", dropout_prob, True)
         check_in("norm_style", norm_style, {"none", "batch", "instance", "channel"})
         super().__init__(input_size, output_size)
+        input_size, output_size = self.input_size, self.output_size
         if norm_style == "none":
             Norm = lambda: torch.nn.Identity()
         elif norm_style == "batch":
@@ -213,18 +274,6 @@ class ConvEncoder(Encoder):
         self.conv5 = torch.nn.Conv1d(output_size, output_size, 4, 2, 1)
         self.norm5 = Norm()
 
-    def reset_parameters(self) -> None:
-        self.conv1.reset_parameters()
-        self.norm1.reset_parameters()
-        self.conv2.reset_parameters()
-        self.norm2.reset_parameters()
-        self.conv3.reset_parameters()
-        self.norm3.reset_parameters()
-        self.conv4.reset_parameters()
-        self.norm4.reset_parameters()
-        self.conv5.reset_parameters()
-        self.norm5.reset_parameters()
-
     @property
     def downsampling_factor(self) -> int:
         return 160
@@ -239,8 +288,14 @@ class ConvEncoder(Encoder):
         x, lens = self.mask3(self.relu(self.norm3(self.conv3(self.drop(x)))), lens)
         x, lens = self.mask3(self.relu(self.norm4(self.conv4(self.drop(x)))), lens)
         x, lens = self.mask3(self.relu(self.norm5(self.conv5(self.drop(x)))), lens)
-        x = x.transpose(1, 2)  # N, T, C
+        x = x.transpose(1, 2)
         return x, lens
+
+    def forward(
+        self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # already padded
+        return self.encode(x, lens)
 
 
 class SelfAttentionEncoder(Encoder):
@@ -251,6 +306,7 @@ class SelfAttentionEncoder(Encoder):
     def __init__(
         self,
         input_size: int,
+        output_size: Optional[int] = None,
         num_layers: int = 1,
         num_heads: int = 8,
         dim_feedforward: int = 2048,
@@ -263,7 +319,7 @@ class SelfAttentionEncoder(Encoder):
         check_positive("dim_feedforward", dim_feedforward)
         check_positive("layer_norm_eps", layer_norm_eps)
         check_positive("dropout_prob", dropout_prob, True)
-        super().__init__(input_size)
+        super().__init__(input_size, output_size)
         self.num_heads = num_heads
         encoder_layer = torch.nn.TransformerEncoderLayer(
             input_size,
@@ -278,6 +334,10 @@ class SelfAttentionEncoder(Encoder):
         self.encoder = torch.nn.TransformerEncoder(
             encoder_layer, num_layers, layer_norm, enable_nested_tensor
         )
+        if output_size is None:
+            self.ff = torch.nn.Identity()
+        else:
+            self.ff = torch.nn.Linear(input_size, output_size)
 
     @property
     def downsampling_factor(self) -> int:
@@ -295,7 +355,7 @@ class SelfAttentionEncoder(Encoder):
         self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         mask = ~self.get_mask(x, lens)
-        x = self.encoder(x, mask)
+        x = self.ff(self.encoder(x, mask))
         return x, lens
 
 
@@ -307,6 +367,7 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder):
     def __init__(
         self,
         input_size: int,
+        output_size: Optional[int] = None,
         max_width: Optional[int] = None,
         num_layers: int = 1,
         num_heads: int = 8,
@@ -319,6 +380,7 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder):
             check_positive("max_width", max_width)
         super().__init__(
             input_size,
+            output_size,
             num_layers,
             num_heads,
             dim_feedforward,
@@ -341,7 +403,7 @@ class RecurrentEncoder(Encoder):
     def __init__(
         self,
         input_size: int,
-        output_size: int = 256,
+        output_size: Optional[int] = None,
         num_layers: int = 1,
         recurrent_type: Literal["gru", "lstm", "rnn"] = "gru",
         dropout_prob: float = 0.0,
@@ -357,8 +419,8 @@ class RecurrentEncoder(Encoder):
         else:
             RNN = torch.nn.RNN
         self.rnn = RNN(
-            input_size,
-            output_size,
+            self.input_size,
+            self.output_size,
             num_layers,
             batch_first=True,
             dropout=0.0 if num_layers == 1 else dropout_prob,
@@ -372,19 +434,55 @@ class RecurrentEncoder(Encoder):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         T = x.size(1)
         if lens is not None:
-            x = torch.nn.utils.rnn.pack_padded_sequence(x, lens, True, False)
+            x = torch.nn.utils.rnn.pack_padded_sequence(x, lens.cpu(), True, False)
         x = self.rnn(x)[0]
         if lens is not None:
             x = torch.nn.utils.rnn.pad_packed_sequence(x, True, 0, T)[0]
         return x, lens
 
+    def forward(
+        self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # already padded
+        return self.encode(x, lens)
 
-class CPCLossNetwork(torch.nn.Module):
+
+E = TypeVar("E", bound=Encoder, covariant=True)
+
+
+class CPCLossNetwork(torch.nn.Module, Generic[E]):
 
     __slots__ = ["negative_samples", "prediction_steps"]
 
     negative_samples: int
     prediction_steps: int
+    prediction_encoder: E
+
+    @overload
+    def __init__(
+        self: "CPCLossNetwork[FeedForwardEncoder]",
+        latent_size: int,
+        context_size: Optional[int] = None,
+        prediction_steps: int = 12,
+        negative_samples: int = 128,
+        predictionEncoder: Literal[None] = None,
+        num_speakers: Optional[int] = None,
+        dropout_prob: float = 0.0,
+    ):
+        ...
+
+    @overload
+    def __init__(
+        self: "CPCLossNetwork[E]",
+        latent_size: int,
+        context_size: Optional[int] = None,
+        prediction_steps: int = 12,
+        negative_samples: int = 128,
+        predictionEncoder: E = None,
+        num_speakers: Optional[int] = None,
+        dropout_prob: float = 0.0,
+    ):
+        ...
 
     def __init__(
         self,
@@ -392,6 +490,7 @@ class CPCLossNetwork(torch.nn.Module):
         context_size: Optional[int] = None,
         prediction_steps: int = 12,
         negative_samples: int = 128,
+        prediction_encoder: Optional[E] = None,
         num_speakers: Optional[int] = None,
         dropout_prob: float = 0.0,
     ) -> None:
@@ -402,9 +501,30 @@ class CPCLossNetwork(torch.nn.Module):
             check_positive("context_size", context_size)
         check_positive("prediction_steps", prediction_steps)
         check_positive("negative_samples", negative_samples)
+        check_positive("dropout_prob", dropout_prob, True)
         if num_speakers is not None:
             check_positive("num_speakers", num_speakers)
-        check_positive("dropout_prob", dropout_prob, True)
+        if prediction_encoder is None:
+            prediction_encoder = FeedForwardEncoder(
+                context_size,
+                prediction_steps * latent_size,
+                "none",
+                False,
+                dropout_prob=dropout_prob,
+            )
+        else:
+            check_is_instance("prediction_encoder", prediction_encoder, Encoder)
+            check_equals(
+                "prediction_encoder.input_size",
+                prediction_encoder.input_size,
+                context_size,
+            )
+            check_equals(
+                "prediction_encoder.output_size",
+                prediction_encoder.output_size,
+                prediction_steps * latent_size,
+            )
+
         super().__init__()
         self.negative_samples = negative_samples
         self.prediction_steps = prediction_steps
@@ -414,9 +534,7 @@ class CPCLossNetwork(torch.nn.Module):
         else:
             self.register_module("embed", None)
 
-        self.ff = torch.nn.Linear(context_size, prediction_steps * latent_size, False)
-
-        self.drop = torch.nn.Dropout(dropout_prob)
+        self.prediction_encoder = prediction_encoder
 
         self.unfold = torch.nn.Unfold((prediction_steps, latent_size))
 
@@ -440,7 +558,8 @@ class CPCLossNetwork(torch.nn.Module):
         if self.embed is not None:
             context = context + self.embed(sources).unsqueeze(1)
 
-        Az = self.drop(self.ff(context[:, :Tp])).view(N * Tp * K, C, 1)
+        lens_ = None if lens is None else lens.clamp_max(Tp)
+        Az = self.prediction_encoder(context[:, :Tp], lens_)[0].view(N * Tp * K, C, 1)
 
         if lens is None:
             phi_n = latent.flatten(end_dim=1)

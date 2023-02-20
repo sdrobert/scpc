@@ -27,7 +27,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pydrobert.torch.lightning import LitSpectDataModule
 from pydrobert.torch.data import SpectDataSet
 
-from .models import PretrainedFrontend
+from .models import LightningPretrainedFrontend
 
 
 def main(args: Optional[Sequence[str]] = None):
@@ -39,23 +39,20 @@ def main(args: Optional[Sequence[str]] = None):
         help="which routine to run", dest="cmd", required=True
     )
 
-    PretrainedFrontend.add_argparse_args(
+    LightningPretrainedFrontend.add_argparse_args(
         parser,
         read_format_str="--read-model-{file_format}",
         print_format_str="--print-model-{file_format}",
     )
 
     fit_parser = subparsers.add_parser("fit", help="Train a model")
+    fit_parser.add_argument("train_dir")
+    fit_parser.add_argument("val_dir")
     fit_parser.add_argument(
         "--version",
         type=int,
         default=None,
         help="What version/run of this model to perform/continue",
-    )
-    LitSpectDataModule.add_argparse_args(
-        fit_parser,
-        read_format_str="--read-data-{file_format}",
-        print_format_str="--print-data-{file_format}",
     )
     pl.Trainer.add_argparse_args(fit_parser)
     fit_parser.add_argument(
@@ -93,21 +90,38 @@ def main(args: Optional[Sequence[str]] = None):
 
     options = parser.parse_args(args)
 
-    plm = PretrainedFrontend.from_argparse_args(options)
+    lpf = LightningPretrainedFrontend.from_argparse_args(options)
     if options.cmd == "fit":
-        data = LitSpectDataModule.from_argparse_args(
-            options,
-            suppress_alis=False,
-            suppress_uttids=False,
+        dparams = lpf.params.training.data
+        assert dparams is not None
+        if dparams.train_dir is not None:
+            logging.getLogger("pytorch_lightning").warn(
+                "params.training.data.train_dir has been specified. Overwriting with "
+                "command line argument"
+            )
+        if dparams.val_dir is not None:
+            logging.getLogger("pytorch_lightning").warn(
+                "params.training.data.val_dir has been specified. Overwriting with "
+                "command line argument"
+            )
+        dparams.train_dir = options.train_dir
+        dparams.val_dir = options.val_dir
+        data = LitSpectDataModule(
+            dparams,
             batch_first=True,
-            # shuffle=False,
-            pin_memory=False,
+            sort_batch=False,
+            suppress_alis=False,
+            tokens_only=False,
+            suppress_uttids=False,
+            shuffle=True,
             num_workers=options.num_workers,
+            warn_on_missing=False,
+            on_uneven_distributed="raise",
         )
         root_dir = options.default_root_dir
         if root_dir is None:
             root_dir = os.getcwd()
-        model_name = plm.params.name
+        model_name = lpf.params.name
         if model_name == "model_params":
             logging.getLogger("pytorch_lightning").warn(
                 "saving with default model name 'model_name'. Use a non-default "
@@ -127,21 +141,24 @@ def main(args: Optional[Sequence[str]] = None):
         trainer: pl.Trainer = pl.Trainer.from_argparse_args(
             options, replace_sampler_ddp=False, callbacks=callbacks, logger=logger
         )
-        trainer.fit(plm, data, ckpt_path="last")
+        trainer.fit(lpf, data, ckpt_path="last")
         if not trainer.interrupted:
             # require training to have finished
-            plm = PretrainedFrontend.load_from_checkpoint(
-                cc.best_model_path, params=plm.params
+            lpf = LightningPretrainedFrontend.load_from_checkpoint(
+                cc.best_model_path, params=lpf.params
             )
-            torch.save(plm.get_model().state_dict(), os.path.join(model_dir, "best.pt"))
+            torch.save(
+                lpf.get_inference_model().state_dict(),
+                os.path.join(model_dir, "best.pt"),
+            )
     elif options.cmd == "predict":
         # XXX(sdrobert): we handle this loop ourselves so no ddp stuff is going on.
         device = options.device
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         options.params.initialize_missing()
-        model = plm.get_model().to(device)
-        del plm
+        model = lpf.get_inference_model().to(device)
+        del lpf
         state_dict = torch.load(options.pt, device)
         model.load_state_dict(state_dict)
         model.eval()
@@ -160,11 +177,11 @@ def main(args: Optional[Sequence[str]] = None):
                     torch.save(x, prefix + ".pt")
     elif options.cmd == "info":
         out = options.out
-        out.write(f"input_size {plm.input_size}\n")
-        out.write(f"output_size {plm.output_size}\n")
-        out.write(f"downsampling_factor {plm.downsampling_factor}\n")
-        out.write(f"num_model_params {plm.num_model_parameters}\n")
-        out.write(f"num_total_params {plm.num_total_parameters}\n")
+        out.write(f"input_size {lpf.input_size}\n")
+        out.write(f"output_size {lpf.output_size}\n")
+        out.write(f"downsampling_factor {lpf.downsampling_factor}\n")
+        out.write(f"num_model_params {lpf.num_model_parameters}\n")
+        out.write(f"num_total_params {lpf.num_total_parameters}\n")
     else:
         raise NotImplementedError
 

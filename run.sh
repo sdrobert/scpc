@@ -39,7 +39,8 @@ XTR_FLG=x
 declare -A MDL2FT=(
     [fbank-p12]="fbank"
     [cpc.deft]="raw"
-    [cpc.20480]="raw"
+    [cpc.small]="raw"
+    [cpc.trans]="raw"
 )
 declare -A FT2ARGS=(
     [raw]="--raw"
@@ -234,10 +235,9 @@ if [ ! -f "$em/best.pt" ]; then
     scpc \
         --read-model-yaml "conf/model.$model.yaml" \
         fit \
-            --read-data-yaml "conf/data.libri.$ft.yaml" \
+            "$dlf/train_clean_100_train_subset" \
+            "$dlf/train_clean_100_test_subset" \
             @conf/trainer.args.txt \
-            "--train-dir=$dlf/train_clean_100_train_subset" \
-            "--val-dir=$dlf/train_clean_100_test_subset" \
             "--default_root_dir=$exp" \
             "--version=$ver" $xtra_args
     [ -f "$em/best.pt" ] || exit 1
@@ -285,3 +285,22 @@ if [ ! -f "$zs/scores/.complete" ]; then
     touch "$zs/scores/.complete"
     ((only)) && exit 0
 fi
+
+
+# # check the mean and stddev of phoneme lengths, excluding silence
+# print-torch-ali-data-dir-length-moments \
+#     data/librispeech/raw/train_clean_100/ali --std --exclude-ids 0
+# # returns mean=1362.625 std=806.739
+# # sum of three phoneme Gaussians:
+# #   mean=3*1362.625=4087.875 std=sqrt(3)*806.739=1397.313
+
+# # check the average number of 10ms frames in an utterance
+# unzip -cq resources/converted_aligned_phones.zip | \
+#     awk 'BEGIN {n = 0; c = 0} {n+=NF - 1; c+=1} END {print n / c}'
+# # returns 1267.12
+# # 160 frames/sec: 7.9195 secs/utt
+# # 16,000 samps/sec: 126,712 samps/utt
+# # 20,840 samps/win: 6.187109375 win/utt
+# # to get 8 win per batch, you need 2 utt to be safe
+# # to get 16 win per batch, you need 3 utt to be safe
+# # to get 32 win per batch, you need 6 utt to be safe

@@ -1,3 +1,0 @@
-common:
-  batch_size: 8
-  drop_last: true  # for ddp
