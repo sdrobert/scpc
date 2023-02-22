@@ -1,0 +1,19 @@
+name: cpc.tri
+system_description: "CPC.trans but with approx. 3 phonemes' context"
+context_type: csa
+conv:
+  output_size: 256
+  norm_type: channel
+csa:
+  max_width: 43
+  num_layers: 2
+training:
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+  chunking:
+    lobe_size: 6879
+    max_chunks: 48

@@ -1,0 +1,19 @@
+name: cpc.mono
+system_description: "CPC.trans but with approx. 1 phoneme's context"
+context_type: csa
+conv:
+  output_size: 256
+  norm_type: channel
+csa:
+  max_width: 19
+  num_layers: 2
+training:
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+  chunking:
+    lobe_size: 3039
+    max_chunks: 108

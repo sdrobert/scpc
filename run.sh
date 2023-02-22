@@ -37,10 +37,12 @@ PRC_FLG=p
 LIB_FLG=l
 XTR_FLG=x
 declare -A MDL2FT=(
-    [fbank-p12]="fbank"
     [cpc.deft]="raw"
+    [cpc.mono]="raw"
     [cpc.small]="raw"
     [cpc.trans]="raw"
+    [cpc.tri]="raw"
+    [fbank-p12]="fbank"
 )
 declare -A FT2ARGS=(
     [raw]="--raw"
@@ -287,13 +289,6 @@ if [ ! -f "$zs/scores/.complete" ]; then
 fi
 
 
-# # check the mean and stddev of phoneme lengths, excluding silence
-# print-torch-ali-data-dir-length-moments \
-#     data/librispeech/raw/train_clean_100/ali --std --exclude-ids 0
-# # returns mean=1362.625 std=806.739
-# # sum of three phoneme Gaussians:
-# #   mean=3*1362.625=4087.875 std=sqrt(3)*806.739=1397.313
-
 # # check the average number of 10ms frames in an utterance
 # unzip -cq resources/converted_aligned_phones.zip | \
 #     awk 'BEGIN {n = 0; c = 0} {n+=NF - 1; c+=1} END {print n / c}'
@@ -304,3 +299,17 @@ fi
 # # to get 8 win per batch, you need 2 utt to be safe
 # # to get 16 win per batch, you need 3 utt to be safe
 # # to get 32 win per batch, you need 6 utt to be safe
+
+
+# # check the mean and stddev of phoneme lengths, excluding silence
+# print-torch-ali-data-dir-length-moments \
+#     data/librispeech/raw/train_clean_100/ali --std --exclude-ids 0
+# # returns mean=1362.625 std=806.739
+# # sum of three phoneme Gaussians:
+# #   mean=3*1362.625=4087.875 std=sqrt(3)*806.739=1397.313
+# # 1 phone 95% confidence interval = 2,976.103
+# #  - nearest multiple of 160: 3,040 (19 frames)
+# # 3 phone 95% confidence interval = 6,882.501
+# #  - nearest multiple of 160: 6,880 (43 frames)
+# # 64 win/batch * (20,480 samps/win / 3,040 samps/win) ~ 432 win (108 / gpu)
+# # 64 win/batch * (20,480 samps/win / 6,880 samps/win) ~ 192 win (48 / gpu)
