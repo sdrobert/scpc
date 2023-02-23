@@ -683,11 +683,12 @@ class EncoderSequence(Encoder, json_name="seq"):
 
 
 class CPCLossNetwork(torch.nn.Module, Generic[E]):
-    __slots__ = "negative_samples", "prediction_steps"
+    __slots__ = "negative_samples", "prediction_steps", "offset"
 
     negative_samples: int
     prediction_steps: int
     prediction_encoder: E
+    offset: int
 
     @overload
     def __init__(
@@ -699,6 +700,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         predictionEncoder: Literal[None] = None,
         num_speakers: Optional[int] = None,
         dropout_prob: float = 0.0,
+        offset: int = 0,
     ):
         ...
 
@@ -712,6 +714,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         predictionEncoder: E = None,
         num_speakers: Optional[int] = None,
         dropout_prob: float = 0.0,
+        offset: int = 0,
     ):
         ...
 
@@ -724,6 +727,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         prediction_encoder: Optional[E] = None,
         num_speakers: Optional[int] = None,
         dropout_prob: float = 0.0,
+        offset: int = 0,
     ) -> None:
         check_positive("latent_size", latent_size)
         if context_size is None:
@@ -733,6 +737,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         check_positive("prediction_steps", prediction_steps)
         check_positive("negative_samples", negative_samples)
         check_positive("dropout_prob", dropout_prob, True)
+        check_positive("offset", offset, True)
         if num_speakers is not None:
             check_positive("num_speakers", num_speakers)
         if prediction_encoder is None:
@@ -759,6 +764,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         super().__init__()
         self.negative_samples = negative_samples
         self.prediction_steps = prediction_steps
+        self.offset = offset
 
         if num_speakers is not None:
             self.embed = torch.nn.Embedding(num_speakers, context_size)
@@ -783,22 +789,24 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         assert N > 0 and T > 0, (N, T)
         assert context.shape[:2] == (N, T)
         K, M = self.prediction_steps, self.negative_samples
-        Tp = T - self.prediction_steps
+        Tp = T - K - self.offset
         assert Tp > 0, "prediction window too large for sequences"
+        latent = latent[:, self.offset :]
 
         if self.embed is not None:
             context = context + self.embed(sources).unsqueeze(1)
 
-        lens_ = None if lens is None else lens.clamp_max(Tp)
-        Az = self.prediction_encoder(context[:, :Tp], lens_)[0].view(N * Tp * K, C, 1)
+        lens_ = None if lens is None else lens.clamp_max(T - K)
+        Az = self.prediction_encoder(context[:, : T - K], lens_)[0]  # (N, T - K, K * C)
+        Az = Az[:, self.offset :].reshape(N * Tp * K, C, 1)
 
         if lens is None:
             phi_n = latent.flatten(end_dim=1)
             norm = latent.new_ones(1)
         else:
-            norm = (lens - K).clamp_min_(0).sum() * K
+            norm = (lens - K - self.offset).clamp_min_(0).sum() * K
             assert norm > 0, "prediction window too large"
-            mask = get_length_mask(latent, lens, seq_dim=1)
+            mask = get_length_mask(latent, lens - self.offset, seq_dim=1)
             phi_n = latent[mask].view(-1, latent.size(2))
         samps = torch.randint(phi_n.size(0), (N * Tp * M,), device=latent.device)
         phi_n = phi_n[samps].view(N * Tp, 1, M, C).expand(N * Tp, K, M, C).flatten(0, 1)
@@ -816,7 +824,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         if lens is None:
             loss = loss.mean()
         else:
-            mask = get_length_mask(loss, lens - K, seq_dim=1)
+            mask = get_length_mask(loss, lens - K - self.offset, seq_dim=1)
             loss = loss.masked_fill(~mask, 0.0).sum()
             loss = loss / norm
         return loss  # + math.log(M + 1)

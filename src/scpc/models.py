@@ -110,6 +110,11 @@ class CPCLossParams(param.Parameterized):
         doc="Number of speakers to construct embeddings for. Source hashes will be "
         "extracted from utterance ids. Unset means no embeddings used",
     )
+    offset: int = param.Integer(
+        0,
+        bounds=(0, None),
+        doc="Frame offset from start of utterance/chunk to begin computing loss from",
+    )
     speaker_regex: str = param.String(
         r"^lbi-([^-]+)-.*$",
         doc="Regular expression to extract speaker id from utterance id. Must contain "
@@ -415,6 +420,8 @@ class LightningPretrainedFrontend(pl.LightningModule):
                 params.training.cpc_loss.negative_samples,
                 penc,
                 num_speakers,
+                params.training.dropout_prob,
+                params.training.cpc_loss.offset,
             )
         else:
             raise NotImplementedError

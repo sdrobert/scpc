@@ -78,7 +78,8 @@ def test_causal_self_attention_encoder_is_causal():
     "embedding", [True, False], ids=["w/-embedding", "w/o-embedding"]
 )
 @pytest.mark.parametrize("penc", ["ff", "recur", "csa"])
-def test_cpc_prediction_network_matches_manual_comp(embedding, penc):
+@pytest.mark.parametrize("offset", [0, 2])
+def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset):
     torch.manual_seed(2)
     N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 100
     lens = torch.randint(K + 1, T + 1, (N,))
@@ -96,7 +97,7 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc):
     else:
         penc = RecurrentEncoder(Cc, Cl * K)
 
-    net = CPCLossNetwork(Cl, Cc, K, M, penc, N if embedding else None)
+    net = CPCLossNetwork(Cl, Cc, K, M, penc, N if embedding else None, 0, offset)
     net.eval()
 
     loss_exp, latents_ = 0.0, []
@@ -115,9 +116,9 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc):
         Az_n = Az_n.view(lens_n, K, Cl).transpose(0, 1)
         for k in range(1, K + 1):
             Az_n_k = Az_n[k - 1]  # (lens_n - 1, Cl)
-            for t in range(lens_n - k - 1):
-                Az_n_k_t = Az_n_k[t]  # (Cl,)
-                latent_n_tpk = latent_n[t + k]  # (Cl,)
+            for t in range(lens_n - k - 1 - offset):
+                Az_n_k_t = Az_n_k[t + offset]  # (Cl,)
+                latent_n_tpk = latent_n[t + k + offset]  # (Cl,)
                 num = Az_n_k_t @ latent_n_tpk
                 assert num.numel() == 1
                 latent_samp_n_t = latent_samp_n[t]  # (M, Cl)
