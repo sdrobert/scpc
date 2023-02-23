@@ -1,4 +1,6 @@
 from typing import Type
+from tempfile import TemporaryFile
+
 import pytest
 import torch
 
@@ -135,7 +137,7 @@ class DummyEncoder(IdentityEncoder, json_name="dummy"):
 
 
 @pytest.mark.parametrize("from_class", ["Encoder", "EncoderSequence", "DummyEncoder"])
-def test_to_from_json(from_class):
+def test_checkpoints(from_class):
     torch.manual_seed(3)
     N, Tmax, H = 100, 1000, 8
     encoder1 = EncoderSequence(
@@ -147,18 +149,18 @@ def test_to_from_json(from_class):
         EncoderSequence(IdentityEncoder(H)),
         ConvEncoder(H, norm_style="channel"),
     )
+    f = TemporaryFile()
     encoder1.eval()
-    json = encoder1.to_json()
-    assert len(json["args"]) == 7
+    encoder1.save_checkpoint(f)
+    f.seek(0)
     if from_class == "Encoder":
-        encoder2 = Encoder.from_json(json)
+        encoder2 = Encoder.from_checkpoint(f)
     elif from_class == "EncoderSequence":
-        encoder2 = EncoderSequence.from_json(json)
+        encoder2 = EncoderSequence.from_checkpoint(f)
     else:
         with pytest.raises(ValueError, match="subclass"):
-            DummyEncoder.from_json(json)
+            DummyEncoder.from_checkpoint(f)
         return
-    encoder2.load_state_dict(encoder1.state_dict())
     encoder2.eval()
     x = torch.randn(N, Tmax, H)
     lens = torch.randint(1, Tmax + 1, (N,))

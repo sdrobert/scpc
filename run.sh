@@ -120,47 +120,45 @@ zs="$em/zrc/librispeech"
 export APP_DIR="$dz/local/data"
 export TEMP_DIR="$TMPDIR"
 
-# download librispeech if necessary
 if [ -z "$libri" ] &&  [ ! -f "$dl/.complete" ]; then
-    # n.b. don't need to know where librispeech is if already done init_word
     libri="$dl/local/data"
     if [ ! -f "$libri/.complete" ]; then
-        # Download librispeech
+        echo "Downloading librispeech"
         python prep/librispeech.py "$dl" download
         touch "$libri/.complete"
         ((only)) && exit 0
     fi
 fi
 
-# download abxLS-dataset
 if [ ! -f "$dz/.complete" ]; then
     # FIXME(sdrobert): this is entirely redundant. the files are the same
     # as the librispeech dev/test partitions, just fewer of them and of WAV
     # format.
+    echo "Downloading zerospeech abxLS"
     zrc datasets:pull abxLS-dataset
     touch "$dz/.complete"
     ((only)) && exit 0
 fi
 
-# initial prep of dataset
 if [ ! -f "$dl/.complete" ]; then
-    python prep/librispeech.py data/librispeech preamble \
+    echo "Performing common prep of librispeech"
+    python prep/librispeech.py "$dl" preamble \
         --speakers-are-readers --exclude-subsets "$libri"
-    python prep/librispeech.py data/librispeech init_word "$libri"
+    python prep/librispeech.py "$dl" init_word "$libri"
     touch "$dl/.complete"
     ((only)) && exit 0
 fi
 
-# compute features and store in feat/ subdir
 if [ ! -f "$dlf/.complete" ]; then
+    echo "Computing $ft features of librispeech"
     python prep/librispeech.py \
-        data/librispeech torch_dir wrd $ft ${FT2ARGS[$ft]} --compute-up-to=100
+        "$dl" torch_dir wrd $ft ${FT2ARGS[$ft]} --compute-up-to=100
     touch "$dlf/.complete"
     ((only)) && exit 0
 fi
 
-# put phone alignments into ali/ subdir
 if [ ! -f "$dlf/train_clean_100/ali/.complete" ]; then
+    echo "Moving per-frame alignments to data dir for $ft"
     rm -f "$dlf/train_clean_100/ali/.complete-"*
     if [ "$ft" = "raw" ]; then
         # convert 10ms frame alignments to sample alignments and store the
@@ -209,8 +207,8 @@ printf "\n";
     ((only)) && exit 0
 fi
 
-# fix alignments and get info file
 if [ ! -f "$dlf/ext/train_clean_100.info.ark" ]; then
+    echo "Fixing alignments and getting info file"
     failed=0
     get-torch-spect-data-dir-info --fix ${FT2PAD[$ft]} \
         "$dlf/"{train_clean_100,ext/train_clean_100.info.ark} || failed=1
@@ -221,9 +219,9 @@ if [ ! -f "$dlf/ext/train_clean_100.info.ark" ]; then
     ((only)) && exit 0
 fi
 
-# pull out the subsets of train_clean_100 used for training and testing
 for x in train test; do
     if [ ! -f "$dlf/train_clean_100_${x}_subset/.complete" ]; then
+        echo "Making $x subset of train_clean_100"
         subset-torch-spect-data-dir \
             "$dlf/train_clean_100"{,_${x}_subset} \
             --utt-list-file resources/train_clean_100_${x}_subset.txt
@@ -232,38 +230,37 @@ for x in train test; do
     fi
 done
 
-# train model
-if [ ! -f "$em/best.pt" ]; then
+if [ ! -f "$em/best.ckpt" ]; then
+    echo "Training $model model"
     scpc \
-        --read-model-yaml "conf/model.$model.yaml" \
         fit \
+            --read-model-yaml "conf/model.$model.yaml" \
             "$dlf/train_clean_100_train_subset" \
             "$dlf/train_clean_100_test_subset" \
             @conf/trainer.args.txt \
             "--default_root_dir=$exp" \
             "--version=$ver" $xtra_args
-    [ -f "$em/best.pt" ] || exit 1
+    [ -f "$em/best.ckpt" ] || exit 1
     ((only)) && exit 0
 fi
 
-# compute predictions
 for x in dev_clean dev_other test_clean test_other; do
     if [ ! -f "$pdl/$x/.complete" ]; then
+        echo "Computing predictions for $x parition using $model model"
         mkdir -p "$pdl/$x"
         scpc \
-            --read-model-yaml "conf/model.$model.yaml" \
             predict --numpy --device=cuda \
-            "$em/best.pt" "$dlf/$x" "$pdl/$x"
+            "$em/best.ckpt" "$dlf/$x" "$pdl/$x"
         touch "$pdl/$x/.complete"
         ((only)) && exit 0
     fi
 done
 
-# set up zerospeech abxLS submission
 if [ ! -f "$zs/.complete" ]; then
+    echo "Constructing abxLS zerospeech submission using $model model"
     rm -rf "$zs"
     zrc submission:init abxLS "$zs"
-    scpc --read-model-yaml "conf/model.$model.yaml" info | \
+    scpc info "$em/best.ckpt" | \
         awk -v denom=${FT2DENOM[$ft]} '
 BEGIN {spf=0}
 NR == FNR && $1 == "downsampling_factor" {spf=$2 / denom}
@@ -281,8 +278,8 @@ NR != FNR {if ($1 == "system_description:") $2=sd; print}
     ((only)) && exit 0
 fi
 
-# score zerospeech abxLS submission
 if [ ! -f "$zs/scores/.complete" ]; then
+    echo "Scoring abxLS zerospeech submissing using $model model"
     zrc benchmarks:run abxLS "$zs"
     touch "$zs/scores/.complete"
     ((only)) && exit 0

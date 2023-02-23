@@ -36,8 +36,6 @@ __all__ = [
     "ConvEncoderParams",
     "CPCLossParams",
     "FeedForwardEncoderParams",
-    "Model",
-    "LightningPretrainedFrontend",
     "LightningPretrainedFrontend",
     "LightningPretrainedFrontendParams",
     "RecurrentEncoderParams",
@@ -291,24 +289,6 @@ Batch = Tuple[
 ]
 
 
-class PretrainedFrontend(torch.nn.Module):
-    def __init__(self, latent: Encoder, context: Encoder) -> None:
-        super().__init__()
-        self.latent = latent
-        self.context = context
-
-    @property
-    def downsampling_factor(self) -> int:
-        return self.context.downsampling_factor * self.latent.downsampling_factor
-
-    def forward(
-        self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        x, lens = self.latent(x, lens)
-        x, lens = self.context(x, lens)
-        return x, lens
-
-
 class LightningPretrainedFrontend(pl.LightningModule):
     params: LightningPretrainedFrontendParams
     latent: Encoder
@@ -488,8 +468,8 @@ class LightningPretrainedFrontend(pl.LightningModule):
     def num_total_parameters(self) -> int:
         return self._num_params(self.parameters())
 
-    def get_inference_model(self) -> PretrainedFrontend:
-        return PretrainedFrontend(self.latent, self.context)
+    def get_inference_model(self) -> EncoderSequence:
+        return EncoderSequence(self.latent, self.context)
 
     def get_speakers_from_uttids(self, utt_ids: Tuple[str, ...]) -> torch.Tensor:
         speakers = torch.empty(len(utt_ids), dtype=torch.long)

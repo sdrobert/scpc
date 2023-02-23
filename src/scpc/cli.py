@@ -28,6 +28,7 @@ from pydrobert.torch.lightning import LitSpectDataModule
 from pydrobert.torch.data import SpectDataSet
 
 from .models import LightningPretrainedFrontend
+from .modules import Encoder
 
 
 def main(args: Optional[Sequence[str]] = None):
@@ -39,20 +40,27 @@ def main(args: Optional[Sequence[str]] = None):
         help="which routine to run", dest="cmd", required=True
     )
 
-    LightningPretrainedFrontend.add_argparse_args(
-        parser,
-        read_format_str="--read-model-{file_format}",
-        print_format_str="--print-model-{file_format}",
-    )
-
     fit_parser = subparsers.add_parser("fit", help="Train a model")
     fit_parser.add_argument("train_dir")
     fit_parser.add_argument("val_dir")
+    fit_parser.add_argument(
+        "best",
+        nargs="?",
+        default=None,
+        help="Where to save best inference model chekpoint to. Defaults to "
+        "'<root_dir>/<model_name>/version_<version>/best.ckpt' if --version is "
+        "specified, otherwise '<root_dir>/<model_name>/best.ckpt'",
+    )
     fit_parser.add_argument(
         "--version",
         type=int,
         default=None,
         help="What version/run of this model to perform/continue",
+    )
+    LightningPretrainedFrontend.add_argparse_args(
+        fit_parser,
+        read_format_str="--read-model-{file_format}",
+        print_format_str="--print-model-{file_format}",
     )
     pl.Trainer.add_argparse_args(fit_parser)
     fit_parser.add_argument(
@@ -63,7 +71,7 @@ def main(args: Optional[Sequence[str]] = None):
         "predict", help="Output hidden states of trained model"
     )
     predict_parser.add_argument(
-        "pt", type=argparse.FileType("rb"), help="Path to state_dict to load"
+        "best", type=argparse.FileType("rb"), help="Path to best checkpoint"
     )
     predict_parser.add_argument("in_dir", help="Path to SpectDataSet dir to read from")
     predict_parser.add_argument("out_dir", help="Where to store representations")
@@ -77,8 +85,9 @@ def main(args: Optional[Sequence[str]] = None):
         help="Whether to store as .npy files",
     )
 
-    info_parser = subparsers.add_parser(
-        "info", help="Print info about model based on configuration"
+    info_parser = subparsers.add_parser("info", help="Print info about inference model")
+    predict_parser.add_argument(
+        "best", type=argparse.FileType("rb"), help="Path to checkpoint"
     )
     info_parser.add_argument(
         "out",
@@ -90,8 +99,8 @@ def main(args: Optional[Sequence[str]] = None):
 
     options = parser.parse_args(args)
 
-    lpf = LightningPretrainedFrontend.from_argparse_args(options)
     if options.cmd == "fit":
+        lpf = LightningPretrainedFrontend.from_argparse_args(options)
         dparams = lpf.params.training.data
         assert dparams is not None
         if dparams.train_dir is not None:
@@ -142,25 +151,22 @@ def main(args: Optional[Sequence[str]] = None):
             options, replace_sampler_ddp=False, callbacks=callbacks, logger=logger
         )
         trainer.fit(lpf, data, ckpt_path="last")
+        # require training to have finished before saving
         if not trainer.interrupted:
-            # require training to have finished
             lpf = LightningPretrainedFrontend.load_from_checkpoint(
                 cc.best_model_path, params=lpf.params
             )
-            torch.save(
-                lpf.get_inference_model().state_dict(),
-                os.path.join(model_dir, "best.pt"),
-            )
+            ckpt_path = options.best
+            if ckpt_path is None:
+                ckpt_path = os.path.join(model_dir, "best.ckpt")
+            lpf.get_inference_model().save_checkpoint(ckpt_path)
     elif options.cmd == "predict":
         # XXX(sdrobert): we handle this loop ourselves so no ddp stuff is going on.
         device = options.device
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         options.params.initialize_missing()
-        model = lpf.get_inference_model().to(device)
-        del lpf
-        state_dict = torch.load(options.pt, device)
-        model.load_state_dict(state_dict)
+        model = Encoder.from_checkpoint(options.best).to(device)
         model.eval()
         ds = SpectDataSet(options.in_dir, suppress_alis=True, suppress_uttids=False)
         os.makedirs(options.out_dir, exist_ok=True)
@@ -176,12 +182,12 @@ def main(args: Optional[Sequence[str]] = None):
                 else:
                     torch.save(x, prefix + ".pt")
     elif options.cmd == "info":
+        encoder = Encoder.from_checkpoint(options.best)
         out = options.out
-        out.write(f"input_size {lpf.input_size}\n")
-        out.write(f"output_size {lpf.output_size}\n")
-        out.write(f"downsampling_factor {lpf.downsampling_factor}\n")
-        out.write(f"num_model_params {lpf.num_model_parameters}\n")
-        out.write(f"num_total_params {lpf.num_total_parameters}\n")
+        out.write(f"input_size {encoder.input_size}\n")
+        out.write(f"output_size {encoder.output_size}\n")
+        out.write(f"downsampling_factor {encoder.downsampling_factor}\n")
+        out.write(f"num_params {sum(np.prod(p.shape) for p in encoder.parameters())}\n")
     else:
         raise NotImplementedError
 

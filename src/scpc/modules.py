@@ -16,10 +16,14 @@
 # limitations under the License.
 
 import abc
+import os
 from typing import (
+    IO,
     Any,
+    BinaryIO,
     Collection,
     Dict,
+    Final,
     Generic,
     Literal,
     Optional,
@@ -27,6 +31,7 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
+    Union,
     overload,
 )
 from typing_extensions import Self
@@ -168,6 +173,7 @@ class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
 
     JSON_NAME: str
     JSON_NAME2ENC: Dict[str, Type[E]] = dict()
+    JSON_STATE_DICT_ENTRY: Final = "json"
 
     def __init__(self, input_size: int, output_size: Optional[int] = None) -> None:
         check_positive("input_size", input_size)
@@ -226,6 +232,29 @@ class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
                 f"json 'name' key had value '{json_name}', but '{cls_.__name__}' "
                 f"is not a subclass of '{cls.__name__}'"
             )
+
+    def save_checkpoint(self, f: Union[str, BinaryIO, IO[bytes], os.PathLike]):
+        state_dict = self.state_dict()
+        assert self.JSON_STATE_DICT_ENTRY not in state_dict
+        state_dict[self.JSON_STATE_DICT_ENTRY] = self.to_json()
+        torch.save(state_dict, f)
+
+    @classmethod
+    def from_checkpoint(
+        cls, f: Union[str, BinaryIO, IO[bytes], os.PathLike], strict: bool = True
+    ) -> Self:
+        state_dict = torch.load(f)
+        if not isinstance(state_dict, dict):
+            raise ValueError(f"checkpoint file does not contain a dictionary")
+        elif cls.JSON_STATE_DICT_ENTRY not in state_dict:
+            raise ValueError(
+                f"checkpoint file contains no entry '{cls.JSON_STATE_DICT_ENTRY}' "
+                "(did you save this with save_checkpoint?)"
+            )
+        json = state_dict.pop(cls.JSON_STATE_DICT_ENTRY)
+        encoder = cls.from_json(json)
+        encoder.load_state_dict(state_dict, strict)
+        return encoder
 
 
 class IdentityEncoder(Encoder, json_name="id"):
