@@ -1,3 +1,6 @@
 [submodule "pytorch-database-prep"]
 	path = prep
 	url = https://github.com/sdrobert/pytorch-database-prep.git
+[submodule "s3prl"]
+	path = s3prl
+	url = https://github.com/sdrobert/s3prl.git

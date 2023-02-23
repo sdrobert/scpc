@@ -19,22 +19,27 @@ import abc
 from typing import (
     Any,
     Collection,
+    Dict,
     Generic,
     Literal,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
     overload,
 )
+from typing_extensions import Self
 
 import torch
+import numpy as np
 
 __all__ = [
     "CausalSelfAttentionEncoder",
     "ConvEncoder",
     "CPCLossNetwork",
     "Encoder",
+    "EncoderSequence",
     "FeedForwardEncoder",
     "IdentityEncoder",
     "RecurrentEncoder",
@@ -84,8 +89,7 @@ def check_equals(name: str, val: Any, other: Any):
 
 
 class MaskingLayer(torch.nn.Module):
-
-    __slots__ = ["window", "padding", "stride", "batch_dim", "seq_dim"]
+    __slots__ = "window", "padding", "stride", "batch_dim", "seq_dim"
     window: int
     stride: int
     padding: int
@@ -123,8 +127,7 @@ class MaskingLayer(torch.nn.Module):
 
 
 class ChannelNorm(torch.nn.Module):
-
-    __slots__ = ["epsilon"]
+    __slots__ = "epsilon"
 
     epsilon: float
 
@@ -155,11 +158,16 @@ class ChannelNorm(torch.nn.Module):
         return x
 
 
-class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
+E = TypeVar("E", bound="Encoder", covariant=True)
 
-    __slots__ = ["input_size", "output_size"]
+
+class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
+    __slots__ = "input_size", "output_size"
     input_size: int
     output_size: int
+
+    JSON_NAME: str
+    JSON_NAME2ENC: Dict[str, Type[E]] = dict()
 
     def __init__(self, input_size: int, output_size: Optional[int] = None) -> None:
         check_positive("input_size", input_size)
@@ -188,8 +196,39 @@ class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
             x = x.masked_fill(~get_length_mask(x, lens, seq_dim=1), 0.0)
         return x, lens
 
+    @classmethod
+    def __init_subclass__(cls, /, json_name: str, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        if json_name in Encoder.JSON_NAME2ENC:
+            raise ValueError(
+                f"Cannot Encoder with json_name '{json_name}'; already registered"
+            )
+        cls.JSON_NAME = json_name
+        Encoder.JSON_NAME2ENC[json_name] = cls
 
-class IdentityEncoder(Encoder):
+    def to_json(self) -> Dict[str, Any]:
+        return {"name": self.JSON_NAME, "args": [self.input_size, self.output_size]}
+
+    @classmethod
+    def from_json(cls, json: Dict[str, Any]) -> Self:
+        json_name = json["name"]
+        if not isinstance(json_name, str):
+            raise ValueError("json value of 'name' is not a string")
+        cls_ = Encoder.JSON_NAME2ENC[json_name]
+        if cls is cls_:
+            args = json.get("args", tuple())
+            kwargs = json.get("kwargs", dict())
+            return cls(*args, **kwargs)
+        elif issubclass(cls_, cls):
+            return cls_.from_json(json)
+        else:
+            raise ValueError(
+                f"json 'name' key had value '{json_name}', but '{cls_.__name__}' "
+                f"is not a subclass of '{cls.__name__}'"
+            )
+
+
+class IdentityEncoder(Encoder, json_name="id"):
     @property
     def downsampling_factor(self) -> int:
         return 1
@@ -200,28 +239,56 @@ class IdentityEncoder(Encoder):
         return x, lens
 
 
-class FeedForwardEncoder(Encoder):
+NonlinearityType = Literal["relu", "sigmoid", "tanh", "none"]
+
+
+class FeedForwardEncoder(Encoder, json_name="ff"):
     def __init__(
         self,
         input_size: int,
         output_size: Optional[int] = None,
-        nonlin: Literal["relu", "sigmoid", "tanh", "none"] = "relu",
+        nonlin_type: NonlinearityType = "relu",
         bias: bool = True,
         dropout_prob: float = 0.0,
     ) -> None:
         check_positive("dropout_prob", dropout_prob, True)
-        check_in("nonlin", nonlin, {"relu", "sigmoid", "tanh", "none"})
+        check_in("nonlin_type", nonlin_type, {"relu", "sigmoid", "tanh", "none"})
         super().__init__(input_size, output_size)
         self.ff = torch.nn.Linear(self.input_size, self.output_size, bias)
         self.drop = torch.nn.Dropout(dropout_prob)
-        if nonlin == "relu":
+        if nonlin_type == "relu":
             self.nonlin = torch.nn.ReLU()
-        elif nonlin == "sigmoid":
+        elif nonlin_type == "sigmoid":
             self.nonlin = torch.nn.Sigmoid()
-        elif nonlin == "tanh":
+        elif nonlin_type == "tanh":
             self.nonlin = torch.nn.Tanh()
         else:
             self.nonlin = torch.nn.Identity()
+
+    @property
+    def nonlin_type(self) -> NonlinearityType:
+        if isinstance(self.nonlin, torch.nn.ReLU):
+            return "relu"
+        elif isinstance(self.nonlin, torch.nn.Sigmoid):
+            return "sigmoid"
+        elif isinstance(self.nonlin, torch.nn.Tanh):
+            return "tanh"
+        else:
+            return "none"
+
+    @property
+    def bias(self) -> bool:
+        return self.ff.bias is not None
+
+    @property
+    def dropout_prob(self) -> float:
+        return self.drop.p
+
+    def to_json(self) -> Dict[str, Any]:
+        dict_ = super().to_json()
+        assert isinstance(dict_["args"], list)
+        dict_["args"].extend([self.nonlin_type, self.bias, self.dropout_prob])
+        return dict_
 
     @property
     def downsampling_factor(self) -> int:
@@ -234,12 +301,15 @@ class FeedForwardEncoder(Encoder):
         return x, lens
 
 
-class ConvEncoder(Encoder):
+NormStyle = Literal["none", "batch", "instance", "channel"]
+
+
+class ConvEncoder(Encoder, json_name="conv"):
     def __init__(
         self,
         input_size: int,
         output_size: Optional[int] = None,
-        norm_style: Literal["none", "batch", "instance", "channel"] = "none",
+        norm_style: NormStyle = "none",
         dropout_prob: float = 0.0,
     ) -> None:
         check_positive("dropout_prob", dropout_prob, True)
@@ -278,6 +348,27 @@ class ConvEncoder(Encoder):
     def downsampling_factor(self) -> int:
         return 160
 
+    @property
+    def norm_style(self) -> NormStyle:
+        if isinstance(self.norm1, torch.nn.BatchNorm1d):
+            return "batch"
+        elif isinstance(self.norm1, torch.nn.InstanceNorm1d):
+            return "instance"
+        elif isinstance(self.norm1, ChannelNorm):
+            return "channel"
+        else:
+            return "none"
+
+    @property
+    def dropout_prob(self) -> float:
+        return self.drop.p
+
+    def to_json(self) -> Dict[str, Any]:
+        dict_ = super().to_json()
+        assert isinstance(dict_["args"], list)
+        dict_["args"].extend([self.norm_style, self.dropout_prob])
+        return dict_
+
     def encode(
         self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -298,11 +389,7 @@ class ConvEncoder(Encoder):
         return self.encode(x, lens)
 
 
-class SelfAttentionEncoder(Encoder):
-
-    __slots__ = ["input_size", "output_size", "num_heads"]
-    num_heads: int
-
+class SelfAttentionEncoder(Encoder, json_name="sa"):
     def __init__(
         self,
         input_size: int,
@@ -312,25 +399,21 @@ class SelfAttentionEncoder(Encoder):
         dim_feedforward: int = 2048,
         dropout_prob: float = 0.0,
         enable_nested_tensor: bool = False,
-        layer_norm_eps: float = 1e-5,
     ) -> None:
         check_positive("num_layers", num_layers)
         check_positive("num_heads", num_heads)
         check_positive("dim_feedforward", dim_feedforward)
-        check_positive("layer_norm_eps", layer_norm_eps)
         check_positive("dropout_prob", dropout_prob, True)
         super().__init__(input_size, output_size)
-        self.num_heads = num_heads
         encoder_layer = torch.nn.TransformerEncoderLayer(
             input_size,
             num_heads,
             dim_feedforward,
             dropout_prob,
             "relu",
-            layer_norm_eps,
-            True,
+            batch_first=True,
         )
-        layer_norm = torch.nn.LayerNorm(input_size, layer_norm_eps)
+        layer_norm = torch.nn.LayerNorm(input_size)
         self.encoder = torch.nn.TransformerEncoder(
             encoder_layer, num_layers, layer_norm, enable_nested_tensor
         )
@@ -340,8 +423,51 @@ class SelfAttentionEncoder(Encoder):
             self.ff = torch.nn.Linear(input_size, output_size)
 
     @property
+    def num_layers(self) -> int:
+        return self.encoder.num_layers
+
+    @property
+    def encoder_layer(self) -> torch.nn.TransformerEncoderLayer:
+        assert len(self.encoder.layers)
+        layer = self.encoder.layers[0]
+        assert isinstance(layer, torch.nn.TransformerEncoderLayer)
+        return layer
+
+    @property
+    def num_heads(self) -> int:
+        return self.encoder_layer.self_attn.num_heads
+
+    @property
+    def dim_feedforward(self) -> int:
+        return self.encoder_layer.linear1.out_features
+
+    @property
+    def dropout_prob(self) -> int:
+        return self.encoder_layer.dropout1.p
+
+    @property
+    def enable_nested_tensor(self) -> bool:
+        return self.encoder.enable_nested_tensor
+
+    @property
     def downsampling_factor(self) -> int:
         return 1
+
+    def to_json(self) -> Dict[str, Any]:
+        dict_ = super().to_json()
+        assert isinstance(dict_["args"], list)
+        if isinstance(self.ff, torch.nn.Identity):
+            dict_["args"][-1] = None
+        dict_["args"].extend(
+            [
+                self.num_layers,
+                self.num_heads,
+                self.dim_feedforward,
+                self.dropout_prob,
+                self.enable_nested_tensor,
+            ]
+        )
+        return dict_
 
     def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
         N, T = x.shape[:2]
@@ -359,9 +485,8 @@ class SelfAttentionEncoder(Encoder):
         return x, lens
 
 
-class CausalSelfAttentionEncoder(SelfAttentionEncoder):
-
-    __slots__ = ["input_size", "output_size", "num_heads", "max_width"]
+class CausalSelfAttentionEncoder(SelfAttentionEncoder, json_name="csa"):
+    __slots__ = "max_width"
     max_width: Optional[int]
 
     def __init__(
@@ -374,7 +499,6 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder):
         dim_feedforward: int = 2048,
         dropout_prob: float = 0.0,
         enable_nested_tensor: bool = False,
-        layer_norm_eps: float = 1e-5,
     ) -> None:
         if max_width is not None:
             check_positive("max_width", max_width)
@@ -386,9 +510,14 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder):
             dim_feedforward,
             dropout_prob,
             enable_nested_tensor,
-            layer_norm_eps,
         )
         self.max_width = max_width
+
+    def to_json(self) -> Dict[str, Any]:
+        dict_ = super().to_json()
+        assert isinstance(dict_["args"], list)
+        dict_["args"].insert(2, self.max_width)
+        return dict_
 
     def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
         len_mask = super().get_mask(x, lens)
@@ -399,13 +528,16 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder):
         return len_mask & causal_mask
 
 
-class RecurrentEncoder(Encoder):
+RecurrentType = Literal["gru", "lstm", "rnn"]
+
+
+class RecurrentEncoder(Encoder, json_name="ra"):
     def __init__(
         self,
         input_size: int,
         output_size: Optional[int] = None,
         num_layers: int = 1,
-        recurrent_type: Literal["gru", "lstm", "rnn"] = "gru",
+        recurrent_type: RecurrentType = "gru",
         dropout_prob: float = 0.0,
     ) -> None:
         check_positive("num_layers", num_layers)
@@ -426,8 +558,32 @@ class RecurrentEncoder(Encoder):
             dropout=0.0 if num_layers == 1 else dropout_prob,
         )
 
+    @property
+    def num_layers(self) -> int:
+        return self.rnn.num_layers
+
+    @property
+    def recurrent_type(self) -> RecurrentType:
+        if isinstance(self.rnn, torch.nn.GRU):
+            return "gru"
+        elif isinstance(self.rnn, torch.nn.LSTM):
+            return "lstm"
+        else:
+            return "rnn"
+
+    @property
+    def dropout_prob(self) -> float:
+        return self.rnn.dropout
+
+    @property
     def downsampling_factor(self) -> int:
         return 1
+
+    def to_json(self) -> Dict[str, Any]:
+        dict_ = super().to_json()
+        assert isinstance(dict_["args"], list)
+        dict_["args"].extend([self.num_layers, self.recurrent_type, self.dropout_prob])
+        return dict_
 
     def encode(
         self, x: torch.Tensor, lens: Optional[torch.Tensor]
@@ -447,12 +603,58 @@ class RecurrentEncoder(Encoder):
         return self.encode(x, lens)
 
 
-E = TypeVar("E", bound=Encoder, covariant=True)
+class EncoderSequence(Encoder, json_name="seq"):
+    encoders: Sequence[Encoder]
+
+    @overload
+    def __init__(self, *encoders: Encoder) -> None:
+        ...
+
+    def __init__(self, encoder: Encoder, *encoders: Encoder) -> None:
+        input_size, output_size = encoder.input_size, encoder.output_size
+        for i, e in enumerate(encoders):
+            check_equals(f"encoders[{i+1}]", e.input_size, output_size)
+            output_size = e.output_size
+        super().__init__(input_size, output_size)
+        self.encoders = torch.nn.ModuleList((encoder,) + encoders)
+
+    @property
+    def downsampling_factor(self) -> int:
+        return np.prod(e.downsampling_factor for e in self.encoders)
+
+    def to_json(self) -> Dict[str, Any]:
+        dict_ = super().to_json()
+        dict_["args"] = [e.to_json() for e in self.encoders]
+        return dict_
+
+    @classmethod
+    def from_json(cls, json: Dict[str, Any]) -> Self:
+        json_name = json["name"]
+        if not isinstance(json_name, str):
+            raise ValueError("json value of 'name' is not a string")
+        cls_ = Encoder.JSON_NAME2ENC[json_name]
+        if cls is cls_:
+            encoders = (Encoder.from_json(x) for x in json["args"])
+            return cls(*encoders)
+        else:
+            return super().from_json(json)
+
+    def encode(
+        self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        for e in self.encoders:
+            x, lens = e(x, lens)
+        return x, lens
+
+    def forward(
+        self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        # already padded
+        return self.encode(x, lens)
 
 
 class CPCLossNetwork(torch.nn.Module, Generic[E]):
-
-    __slots__ = ["negative_samples", "prediction_steps"]
+    __slots__ = "negative_samples", "prediction_steps"
 
     negative_samples: int
     prediction_steps: int
@@ -589,4 +791,3 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
             loss = loss.masked_fill(~mask, 0.0).sum()
             loss = loss / norm
         return loss  # + math.log(M + 1)
-

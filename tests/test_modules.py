@@ -14,6 +14,7 @@ from scpc.modules import *
         IdentityEncoder,
         RecurrentEncoder,
         SelfAttentionEncoder,
+        EncoderSequence,
     ],
     ids=[
         "CausalSelfAttentionEncoder",
@@ -22,12 +23,16 @@ from scpc.modules import *
         "IdentityEncoder",
         "RecurrentEncoder",
         "SelfAttentionEncoder",
+        "EncoderSequence",
     ],
 )
 def test_encoder_variable_batches(Encoder: Type[Encoder]):
     torch.manual_seed(0)
     N, Tmin, Tmax, H = 10, 300, 600, 256
-    encoder = Encoder(H)
+    if Encoder is EncoderSequence:
+        encoder = EncoderSequence(FeedForwardEncoder(H), FeedForwardEncoder(H))
+    else:
+        encoder = Encoder(H)
     encoder.eval()
     x, lens = [], []
     x_exp = []
@@ -123,3 +128,41 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc):
     latents = torch.nn.utils.rnn.pad_sequence(latents_, True, -1)
     loss_act = net(latents, context, lens, speakers)
     assert torch.isclose(loss_exp, loss_act, rtol=1e-1)
+
+
+class DummyEncoder(IdentityEncoder, json_name="dummy"):
+    pass
+
+
+@pytest.mark.parametrize("from_class", ["Encoder", "EncoderSequence", "DummyEncoder"])
+def test_to_from_json(from_class):
+    torch.manual_seed(3)
+    N, Tmax, H = 100, 1000, 8
+    encoder1 = EncoderSequence(
+        CausalSelfAttentionEncoder(H, max_width=5, dim_feedforward=10, num_heads=1),
+        FeedForwardEncoder(H, nonlin_type="sigmoid", bias=False),
+        IdentityEncoder(H),
+        RecurrentEncoder(H, num_layers=2, recurrent_type="lstm"),
+        SelfAttentionEncoder(H),
+        EncoderSequence(IdentityEncoder(H)),
+        ConvEncoder(H, norm_style="channel"),
+    )
+    encoder1.eval()
+    json = encoder1.to_json()
+    assert len(json["args"]) == 7
+    if from_class == "Encoder":
+        encoder2 = Encoder.from_json(json)
+    elif from_class == "EncoderSequence":
+        encoder2 = EncoderSequence.from_json(json)
+    else:
+        with pytest.raises(ValueError, match="subclass"):
+            DummyEncoder.from_json(json)
+        return
+    encoder2.load_state_dict(encoder1.state_dict())
+    encoder2.eval()
+    x = torch.randn(N, Tmax, H)
+    lens = torch.randint(1, Tmax + 1, (N,))
+    out1, lens1 = encoder1(x, lens)
+    out2, lens2 = encoder2(x, lens)
+    assert (lens1 == lens2).all()
+    assert torch.allclose(out1, out2)

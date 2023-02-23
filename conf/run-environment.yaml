@@ -4,7 +4,6 @@ channels:
   - nvidia
   - conda-forge
   - sdrobert
-  - defaults
 dependencies:
   - ipython
   - jiwer

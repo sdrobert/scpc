@@ -47,7 +47,6 @@ __all__ = [
 
 
 class ConvEncoderParams(param.Parameterized):
-
     output_size: int = param.Integer(
         512, bounds=(1, None), doc="Size of output (and # of conv output channels)"
     )
@@ -61,9 +60,8 @@ class ConvEncoderParams(param.Parameterized):
 
 
 class FeedForwardEncoderParams(param.Parameterized):
-
     output_size: int = param.Integer(256, bounds=(1, None), doc="Size of the output")
-    nonlin: Literal["relu", "sigmoid", "tanh", "none"] = param.ObjectSelector(
+    nonlin_type: Literal["relu", "sigmoid", "tanh", "none"] = param.ObjectSelector(
         "relu",
         ["relu", "sigmoid", "tanh", "none"],
         doc="Type of nonlinearity to apply after linear transform",
@@ -72,7 +70,6 @@ class FeedForwardEncoderParams(param.Parameterized):
 
 
 class SelfAttentionEncoderParams(param.Parameterized):
-
     num_layers: int = param.Integer(
         1, bounds=(1, None), doc="Number of self-attention layers"
     )
@@ -83,7 +80,6 @@ class SelfAttentionEncoderParams(param.Parameterized):
 
 
 class CausalSelfAttentionEncoderParams(SelfAttentionEncoderParams):
-
     max_width: Optional[int] = param.Integer(
         None,
         bounds=(1, None),
@@ -92,7 +88,6 @@ class CausalSelfAttentionEncoderParams(SelfAttentionEncoderParams):
 
 
 class RecurrentEncoderParams(param.Parameterized):
-
     output_size: int = param.Integer(
         256, bounds=(1, None), doc="Size of output (and hidden size)"
     )
@@ -105,7 +100,6 @@ class RecurrentEncoderParams(param.Parameterized):
 
 
 class CPCLossParams(param.Parameterized):
-
     prediction_steps: int = param.Integer(
         12, bounds=(1, None), doc="Number of frames ahead to try and predict"
     )
@@ -133,7 +127,6 @@ class CPCLossParams(param.Parameterized):
 
 
 class ChunkingParams(param.Parameterized):
-
     policy: Literal["fixed", "none", "ali", "ref"] = param.ObjectSelector(
         "fixed",
         ["fixed", "none", "ali", "ref"],
@@ -178,7 +171,6 @@ class ChunkingParams(param.Parameterized):
 
 
 class TrainingParams(param.Parameterized):
-
     data: Optional[LitSpectDataModuleParams] = param.ClassSelector(
         LitSpectDataModuleParams, instantiate=False, doc="Data parameters"
     )
@@ -220,7 +212,6 @@ class TrainingParams(param.Parameterized):
 
 
 class LightningPretrainedFrontendParams(param.Parameterized):
-
     system_description: str = param.String(
         "", doc="Description of the system for ZRC submission"
     )
@@ -306,6 +297,10 @@ class PretrainedFrontend(torch.nn.Module):
         self.latent = latent
         self.context = context
 
+    @property
+    def downsampling_factor(self) -> int:
+        return self.context.downsampling_factor * self.latent.downsampling_factor
+
     def forward(
         self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -315,7 +310,6 @@ class PretrainedFrontend(torch.nn.Module):
 
 
 class LightningPretrainedFrontend(pl.LightningModule):
-
     params: LightningPretrainedFrontendParams
     latent: Encoder
     context: Encoder
@@ -352,7 +346,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
             self.latent = FeedForwardEncoder(
                 params.input_size,
                 params.ff.output_size,
-                params.ff.nonlin,
+                params.ff.nonlin_type,
                 params.ff.bias,
                 params.training.dropout_prob,
             )
@@ -574,7 +568,9 @@ class LightningPretrainedFrontend(pl.LightningModule):
         return feats, None, None, feat_sizes, None, utt_ids
 
     def forward(
-        self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor] = None,
+        self,
+        feats: torch.Tensor,
+        feat_lens: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         return self.get_inference_model().forward(feats, feat_lens)
 
@@ -609,7 +605,11 @@ class LightningPretrainedFrontend(pl.LightningModule):
             )
 
         grp = pargparse.add_deserialization_group_to_parser(
-            parser, params, "params", reckless=True, flag_format_str=read_format_str,
+            parser,
+            params,
+            "params",
+            reckless=True,
+            flag_format_str=read_format_str,
         )
         return grp
 
@@ -618,4 +618,3 @@ class LightningPretrainedFrontend(pl.LightningModule):
         params = namespace.params
         params.initialize_missing()
         return cls(params, **kwargs)
-
