@@ -498,18 +498,23 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
         )
         return dict_
 
-    def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
+    def get_valid(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
         N, T = x.shape[:2]
         out_shape = (self.num_heads * N, T, T)
-        len_mask = x.new_ones(out_shape, dtype=torch.bool)
+        valid = x.new_ones(out_shape, dtype=torch.bool)
         if lens is not None:
-            len_mask = get_length_mask(len_mask, lens.repeat_interleave(self.num_heads))
-        return len_mask
+            valid = get_length_mask(valid, lens.repeat_interleave(self.num_heads))
+        return valid
+
+    def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
+        valid = self.get_valid(x, lens)
+        mask = x.new_full(valid.shape, float("-inf")).masked_fill_(valid, 0.0)
+        return mask
 
     def encode(
         self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        mask = ~self.get_mask(x, lens)
+        mask = self.get_mask(x, lens)
         x = self.ff(self.encoder(x, mask))
         return x, lens
 
@@ -548,11 +553,11 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder, json_name="csa"):
         dict_["args"].insert(2, self.max_width)
         return dict_
 
-    def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
-        len_mask = super().get_mask(x, lens)
+    def get_valid(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
+        len_mask = super().get_valid(x, lens)
         T = len_mask.size(-1)
         causal_mask = len_mask.new_ones(T, T).tril_()
-        if self.max_width is not None:
+        if self.max_width is not None and self.max_width < T:
             causal_mask = causal_mask.triu_(-self.max_width + 1)
         return len_mask & causal_mask
 

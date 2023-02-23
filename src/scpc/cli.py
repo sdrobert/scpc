@@ -86,7 +86,7 @@ def main(args: Optional[Sequence[str]] = None):
     )
 
     info_parser = subparsers.add_parser("info", help="Print info about inference model")
-    predict_parser.add_argument(
+    info_parser.add_argument(
         "best", type=argparse.FileType("rb"), help="Path to checkpoint"
     )
     info_parser.add_argument(
@@ -165,7 +165,6 @@ def main(args: Optional[Sequence[str]] = None):
         device = options.device
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        options.params.initialize_missing()
         model = Encoder.from_checkpoint(options.best).to(device)
         model.eval()
         ds = SpectDataSet(options.in_dir, suppress_alis=True, suppress_uttids=False)
