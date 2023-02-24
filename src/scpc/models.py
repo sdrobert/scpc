@@ -75,6 +75,11 @@ class SelfAttentionEncoderParams(param.Parameterized):
     dim_feedforward: int = param.Integer(
         1, bounds=(1, None), doc="Size of intermediate representation"
     )
+    pos_period: Optional[int] = param.Integer(
+        None,
+        bounds=(1, None),
+        doc="If set, attention mask will oscillate between [-1, 1] with this period",
+    )
 
 
 class CausalSelfAttentionEncoderParams(SelfAttentionEncoderParams):
@@ -352,6 +357,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
                 params.csa.dim_feedforward,
                 params.training.dropout_prob,
                 params.training.chunking.policy != "fixed",
+                params.csa.pos_period,
             )
         elif params.context_type == "sa":
             if params.sa is None:
@@ -363,6 +369,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
                 params.sa.dim_feedforward,
                 params.training.dropout_prob,
                 params.training.chunking.policy != "fixed",
+                params.csa.pos_period,
             )
         elif params.context_type == "recur":
             if params.recur is None:
@@ -397,6 +404,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
                     self.context.output_size,
                     params.training.cpc_loss.prediction_steps * self.latent.output_size,
                     dropout_prob=params.training.dropout_prob,
+                    # pos_period=10_000,
                 )
             elif params.training.cpc_loss.prediction_type == "recur":
                 penc = RecurrentEncoder(

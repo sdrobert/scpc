@@ -311,3 +311,13 @@ fi
 # #  - nearest multiple of 160: 6,880 (43 frames)
 # # 64 win/batch * (20,480 samps/win / 3,040 samps/win) ~ 432 win (108 / gpu)
 # # 64 win/batch * (20,480 samps/win / 6,880 samps/win) ~ 192 win (48 / gpu)
+
+
+# # the receptive field of a coefficient w/ K conv layers = r_1
+# # r_K = kernel_k
+# # r_k = kernel_k + stride_k (r_{k+1} - 1)
+# # kernel_5=4,  stride_5=2, r_5 = 4
+# # kernel_4=4,  stride_4=2, r_4 = 4 + 2 * 3 = 10
+# # kernel_3=4,  stride_3=2, r_3 = 4 + 2 * 9 = 22
+# # kernel_2=8,  stride_2=4, r_2 = 8 + 4 * 21 = 92
+# # kernel_1=10, stride_1=5, r_1 = 10 + 5 * 91 = 465 ~ 3 frames

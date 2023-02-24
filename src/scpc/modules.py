@@ -419,6 +419,10 @@ class ConvEncoder(Encoder, json_name="conv"):
 
 
 class SelfAttentionEncoder(Encoder, json_name="sa"):
+    __slots__ = "pos_period"
+    pos_period: Optional[int]
+    pos_buf: Optional[torch.Tensor]
+
     def __init__(
         self,
         input_size: int,
@@ -428,12 +432,16 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
         dim_feedforward: int = 2048,
         dropout_prob: float = 0.0,
         enable_nested_tensor: bool = False,
+        pos_period: Optional[int] = None,
     ) -> None:
         check_positive("num_layers", num_layers)
         check_positive("num_heads", num_heads)
         check_positive("dim_feedforward", dim_feedforward)
         check_positive("dropout_prob", dropout_prob, True)
+        if pos_period is not None:
+            check_positive("pos_period", pos_period)
         super().__init__(input_size, output_size)
+        self.pos_period = pos_period
         encoder_layer = torch.nn.TransformerEncoderLayer(
             input_size,
             num_heads,
@@ -450,6 +458,14 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
             self.ff = torch.nn.Identity()
         else:
             self.ff = torch.nn.Linear(input_size, output_size)
+        if pos_period is not None:
+            pos_buf = torch.arange(pos_period, dtype=torch.float)
+            pos_buf *= 2 * np.pi / pos_period
+            pos_buf = pos_buf.sin_()
+            pos_buf = pos_buf.unsqueeze(1) - pos_buf
+        else:
+            pos_buf = None
+        self.register_buffer("pos_buf", pos_buf, persistent=False)
 
     @property
     def num_layers(self) -> int:
@@ -494,6 +510,7 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
                 self.dim_feedforward,
                 self.dropout_prob,
                 self.enable_nested_tensor,
+                self.pos_period,
             ]
         )
         return dict_
@@ -509,6 +526,12 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
     def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
         valid = self.get_valid(x, lens)
         mask = x.new_full(valid.shape, float("-inf")).masked_fill_(valid, 0.0)
+        if self.pos_period:
+            Ta, Tb = self.pos_buf.size(0), valid.size(1)
+            if Ta < Tb:
+                r = (Tb + Ta - 1) // Ta
+                self.pos_buf = self.pos_buf.repeat(r, r)
+            mask += self.pos_buf[:Tb, :Tb].expand_as(mask)
         return mask
 
     def encode(
@@ -533,6 +556,7 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder, json_name="csa"):
         dim_feedforward: int = 2048,
         dropout_prob: float = 0.0,
         enable_nested_tensor: bool = False,
+        pos_period: Optional[int] = None,
     ) -> None:
         if max_width is not None:
             check_positive("max_width", max_width)
@@ -544,6 +568,7 @@ class CausalSelfAttentionEncoder(SelfAttentionEncoder, json_name="csa"):
             dim_feedforward,
             dropout_prob,
             enable_nested_tensor,
+            pos_period,
         )
         self.max_width = max_width
 

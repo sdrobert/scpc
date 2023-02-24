@@ -33,6 +33,8 @@ def test_encoder_variable_batches(Encoder: Type[Encoder]):
     N, Tmin, Tmax, H = 10, 300, 600, 256
     if Encoder is EncoderSequence:
         encoder = EncoderSequence(FeedForwardEncoder(H), FeedForwardEncoder(H))
+    elif Encoder is SelfAttentionEncoder:
+        encoder = SelfAttentionEncoder(H, pos_period=Tmax)
     else:
         encoder = Encoder(H)
     encoder.eval()
@@ -142,7 +144,9 @@ def test_checkpoints(from_class):
     torch.manual_seed(3)
     N, Tmax, H = 100, 1000, 8
     encoder1 = EncoderSequence(
-        CausalSelfAttentionEncoder(H, max_width=5, dim_feedforward=10, num_heads=1),
+        CausalSelfAttentionEncoder(
+            H, max_width=5, dim_feedforward=10, num_heads=1, pos_period=1
+        ),
         FeedForwardEncoder(H, nonlin_type="sigmoid", bias=False),
         IdentityEncoder(H),
         RecurrentEncoder(H, num_layers=2, recurrent_type="lstm"),

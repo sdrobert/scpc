@@ -3,10 +3,10 @@ system_description: "CPC.trans but with approx. 3 phonemes' context"
 context_type: csa
 conv:
   output_size: 256
-  norm_type: channel
+  norm_type: batch
 csa:
-  max_width: 43
-  num_layers: 2
+  max_width: 11 # ~43 / 4
+  num_layers: 4
 training:
   data:
     common:
