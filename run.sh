@@ -37,8 +37,12 @@ PRC_FLG=p
 LIB_FLG=l
 XTR_FLG=x
 declare -A MDL2FT=(
+    [cpc.cmono]="raw"
+    [cpc.cmono-p4]="raw"
+    [cpc.cmono-p8]="raw"
     [cpc.deft]="raw"
     [cpc.mono]="raw"
+    [cpc.nocontext]="raw"
     [cpc.small]="raw"
     [cpc.trans]="raw"
     [cpc.tri]="raw"
@@ -303,6 +307,7 @@ fi
 # print-torch-ali-data-dir-length-moments \
 #     data/librispeech/raw/train_clean_100/ali --std --exclude-ids 0
 # # returns mean=1362.625 std=806.739
+# #  - nearest multiple of 160: 1280 (9 frames)
 # # sum of three phoneme Gaussians:
 # #   mean=3*1362.625=4087.875 std=sqrt(3)*806.739=1397.313
 # # 1 phone 95% confidence interval = 2,976.103

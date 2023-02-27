@@ -1,7 +1,5 @@
 # scpc
 
-Experimenting with smaller windows in CPC acoustic modelling
-
 See the [README](resources/README) for more details on the phone alignments
 and train/test split.
 
@@ -40,7 +38,7 @@ Alternatively, if you just want the s3prl stuff, you can install the branch
 into a new environment
 
 ``` sh
-pip install git+https://github.com/sdrobert/s3prl/tree/scpc
+pip install git+https://github.com/sdrobert/s3prl@scpc
 ```
 
 ## License
@@ -48,6 +46,10 @@ pip install git+https://github.com/sdrobert/s3prl/tree/scpc
 This repository is Apache 2.0-licensed. See [LICENSE](LICENSE) for the full
 license details.
 
+[s3prl](https://github.com/s3prl/s3prl) is also Apache 2.0-licensed. Our fork's
+modifications are restricted solely to the [scpc upstream
+folder](s3prl/s3prl/upstream/scpc).
+
 [cpc_audio](https://github.com/facebookresearch/CPC_audio), which this
-repository borrows from, is MIT-licensed. See
-[LICENSE_cpc_audio](LICENSE_cpc_audio).
+repository borrows from in [modules.py](src/scpc/modules.py), is MIT-licensed.
+See [LICENSE_cpc_audio](LICENSE_cpc_audio).

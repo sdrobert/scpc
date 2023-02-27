@@ -21,6 +21,7 @@ from typing import (
     IO,
     Any,
     BinaryIO,
+    Callable,
     Collection,
     Dict,
     Final,
@@ -168,6 +169,10 @@ E = TypeVar("E", bound="Encoder", covariant=True)
 
 class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
     __slots__ = "input_size", "output_size"
+    __call__: Callable[
+        [torch.Tensor, Optional[torch.Tensor]],
+        Tuple[torch.Tensor, Optional[torch.Tensor]],
+    ]
     input_size: int
     output_size: int
 
@@ -241,9 +246,12 @@ class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
 
     @classmethod
     def from_checkpoint(
-        cls, f: Union[str, BinaryIO, IO[bytes], os.PathLike], strict: bool = True
+        cls,
+        f: Union[str, BinaryIO, IO[bytes], os.PathLike],
+        map_location: Any = None,
+        strict: bool = True,
     ) -> Self:
-        state_dict = torch.load(f)
+        state_dict = torch.load(f, map_location)
         if not isinstance(state_dict, dict):
             raise ValueError(f"checkpoint file does not contain a dictionary")
         elif cls.JSON_STATE_DICT_ENTRY not in state_dict:
@@ -679,7 +687,7 @@ class EncoderSequence(Encoder, json_name="seq"):
 
     @property
     def downsampling_factor(self) -> int:
-        return np.prod(e.downsampling_factor for e in self.encoders)
+        return np.prod([e.downsampling_factor for e in self.encoders])
 
     def to_json(self) -> Dict[str, Any]:
         dict_ = super().to_json()

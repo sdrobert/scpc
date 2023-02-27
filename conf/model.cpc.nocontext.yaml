@@ -1,0 +1,15 @@
+name: cpc.nocontext
+system_description: "CPC with only the convolutions and transformer predictor"
+context_type: id
+conv:
+  output_size: 256
+  norm_type: channel
+training:
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+  chunking:
+    max_chunks: 16

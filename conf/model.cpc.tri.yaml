@@ -1,5 +1,5 @@
 name: cpc.tri
-system_description: "CPC.trans but with approx. 3 phonemes' context"
+system_description: "CPC-trans but with approx. 3 phonemes' context"
 context_type: csa
 conv:
   output_size: 256

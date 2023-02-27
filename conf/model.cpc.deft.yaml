@@ -5,7 +5,5 @@ training:
     common:
       batch_size: 3
       drop_last: true
-  cpc_loss:
-    prediction_type: csa
   chunking:
     max_chunks: 16
