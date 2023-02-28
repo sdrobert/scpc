@@ -40,6 +40,7 @@ declare -A MDL2FT=(
     [cpc.cmono]="raw"
     [cpc.cmono-p4]="raw"
     [cpc.cmono-p8]="raw"
+    [cpc.nocontext-p8]="raw"
     [cpc.deft]="raw"
     [cpc.mono]="raw"
     [cpc.nocontext]="raw"

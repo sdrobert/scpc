@@ -7,9 +7,11 @@ conv:
 training:
   data:
     common:
-      batch_size: 3
+      batch_size: 6
       drop_last: true
   cpc_loss:
+    prediction_steps: 8
     prediction_type: csa
+    offset: 9
   chunking:
-    max_chunks: 16
+    max_chunks: 32
