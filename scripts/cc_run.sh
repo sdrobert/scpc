@@ -6,6 +6,8 @@
 #SBATCH --signal=SIGUSR1@90
 #SBATCH --output=exp/slurm_logs/slurm-%j.out
 
+set -e
+
 source scripts/cc_env.sh
 
 P="${SLURM_CPUS_PER_TASK:-4}"

@@ -1,0 +1,4 @@
+pytorch-lightning
+rich
+torch >=1.10
+tensorboardX
