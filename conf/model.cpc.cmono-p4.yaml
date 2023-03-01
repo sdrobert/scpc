@@ -3,18 +3,18 @@ system_description: "CPC-cmono but with 4 prediction steps"
 context_type: csa
 conv:
   output_size: 256
-  norm_type: batch
+  norm_type: channel
 csa:
-  max_width: 2  # ~9 / 4
-  num_layers: 4
+  max_width: 9
 training:
+  num_devices: 2
   data:
     common:
-      batch_size: 12
+      batch_size: 6
       drop_last: true
   cpc_loss:
     prediction_steps: 4
     prediction_type: csa
-    offset: 9
+    offset: 8
   chunking:
-    max_chunks: 64
+    max_chunks: 32

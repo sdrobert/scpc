@@ -2,12 +2,12 @@ name: cpc.tri
 system_description: "CPC-trans but with approx. 3 phonemes' context"
 context_type: csa
 conv:
-  output_size: 256
+  output_size: channel
   norm_type: batch
 csa:
-  max_width: 11 # ~43 / 4
-  num_layers: 4
+  max_width: 43
 training:
+  num_devices: 4
   data:
     common:
       batch_size: 3

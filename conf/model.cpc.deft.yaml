@@ -1,6 +1,7 @@
 name: cpc.deft
 system_description: "CPC resembling van der Ooord et al. 2019"
 training:
+  num_devices: 4
   data:
     common:
       batch_size: 3

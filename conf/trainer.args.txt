@@ -1,4 +1,0 @@
---accelerator=gpu
---strategy=ddp
---max_epochs=200
---num-workers=4

@@ -1,9 +1,11 @@
-name: fbank-p12
-system_description: "41-dim fbank baseline w/ 12 CPC prediction steps"
+name: fbank
+system_description: "41-dim fbank baseline"
 input_size: 41
+feat_type: fbank
 latent_type: ff
 context_type: id
 training:
+  num_devices: 4
   data:
     common:
       batch_size: 3

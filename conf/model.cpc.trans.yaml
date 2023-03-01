@@ -3,11 +3,11 @@ system_description: "CPC-small but with transfomers"
 context_type: csa
 conv:
   output_size: 256
-  norm_type: batch
+  norm_type: channel
 csa:
   max_width: 128
-  num_layers: 4
 training:
+  num_devices: 4
   data:
     common:
       batch_size: 3

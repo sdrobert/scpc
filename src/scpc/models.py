@@ -71,9 +71,9 @@ class SelfAttentionEncoderParams(param.Parameterized):
     num_layers: int = param.Integer(
         1, bounds=(1, None), doc="Number of self-attention layers"
     )
-    num_heads: int = param.Integer(1, bounds=(1, None), doc="Number of attention heads")
+    num_heads: int = param.Integer(8, bounds=(1, None), doc="Number of attention heads")
     dim_feedforward: int = param.Integer(
-        1, bounds=(1, None), doc="Size of intermediate representation"
+        2048, bounds=(1, None), doc="Size of intermediate representation"
     )
     pos_period: Optional[int] = param.Integer(
         None,
@@ -204,7 +204,26 @@ class TrainingParams(param.Parameterized):
         doc="Parameters for CPC loss (if loss_type = 'cpc')",
     )
 
-    batch_size: int = param.Integer(1, bounds=(1, None), doc="Size of")
+    accelerator: str = param.String("gpu", doc="Lightning accelerator")
+    shuffle: Optional[bool] = param.Boolean(
+        False,
+        allow_None=True,
+        doc="Whether to shuffle data. Unset will shuffle train but not val",
+    )
+    num_devices: Optional[int] = param.Integer(
+        None,
+        bounds=(1, None),
+        doc="Number of devices to train with in distributed mode. Unset will be serial",
+    )
+    num_nodes: int = param.Integer(
+        1,
+        bounds=(1, None),
+        doc="Number of nodes to train on simultaneously. Relevant only if num_devices "
+        "is set",
+    )
+    max_epochs: int = param.Integer(
+        200, bounds=(1, None), doc="The total number of epochs to train for"
+    )
 
     def initialize_missing(self):
         if self.data is None:
@@ -223,7 +242,7 @@ class LightningPretrainedFrontendParams(param.Parameterized):
     system_description: str = param.String(
         "", doc="Description of the system for ZRC submission"
     )
-
+    feat_type: str = param.String("raw", doc="The type of feature expected as input")
     input_size: int = param.Integer(
         1, bounds=(1, None), doc="Size of input feature dimension (1 for raw)"
     )

@@ -6,14 +6,15 @@ usage () {
     local ret="${1:-1}"
     echo -e "Usage: $0 [-${HLP_FLG}|${OLY_FLG}] [-$DAT_FLG DIR] [-$EXP_FLG DIR] [-$MDL_FLG MDL] [-$VER_FLG I] [-$PRC_FLG N] [-$LIB_FLG DIR]"
     if ((ret == 0)); then
-        IFS=','
+        IFS=","
         cat << EOF 1>&2
 Options
  -$HLP_FLG                  Display this message and exit
  -$OLY_FLG                  Perform only one step and return
  -$DAT_FLG DIR              Root data directory (default: $data)
  -$EXP_FLG DIR              Root experiment directory (defalt: $exp)
- -$MDL_FLG {${!MDL2FT[*]}}      Model to train (default: $model)
+ -$MDL_FLG {${!MDL2FT[*]}}  
+                     Model to train (default: $model)
  -$VER_FLG I                Non-negative integer version number (default: $ver)
  -$PRC_FLG N                Number of threads to spawn in bash pipes
                     (default: $p)
@@ -36,19 +37,6 @@ VER_FLG=v
 PRC_FLG=p
 LIB_FLG=l
 XTR_FLG=x
-declare -A MDL2FT=(
-    [cpc.cmono]="raw"
-    [cpc.cmono-p4]="raw"
-    [cpc.cmono-p8]="raw"
-    [cpc.nocontext-p8]="raw"
-    [cpc.deft]="raw"
-    [cpc.mono]="raw"
-    [cpc.nocontext]="raw"
-    [cpc.small]="raw"
-    [cpc.trans]="raw"
-    [cpc.tri]="raw"
-    [fbank-p12]="fbank"
-)
 declare -A FT2ARGS=(
     [raw]="--raw"
     [fbank]=""
@@ -61,6 +49,27 @@ declare -A FT2DENOM=(
     [raw]="16000"
     [fbank]="100"
 )
+declare -A MDL2FT
+for f in conf/model.*.yaml; do
+    exp_name="${f:11:-5}"
+    act_name="$(awk '$1 == "name:" {print $2}' "$f")"
+    if [ "$exp_name" != "$act_name" ]; then
+        echo -e "expected name: in '$f' to be '$exp_name'; got '$act_name';" \
+            " ignoring as possible model"
+        continue
+    fi
+    ft="$(awk -v ft="raw" '$1 == "feat_type:" {ft=$2} END {print ft}' "$f")"
+    if [ -z "${FT2PAD[$ft]}" ]; then
+        echo -e "expected feat_type: in '$f' to be one of ${!FT2PAD[*]}; got" \
+            "$ft; ignoring as possible model"
+        continue
+    fi
+    MDL2FT["$exp_name"]="$ft"
+done
+if [ -z "${MDL2FT["cpc.deft"]}" ]; then
+    echo -e "Missing cpc.deft!"
+    exit 1
+fi
 
 # variables
 data="data"
@@ -236,15 +245,23 @@ for x in train test; do
     fi
 done
 
+if [ ! -f "$em/model.yaml" ]; then
+    echo "Writing $model configuration to $em/model.yaml"
+    mkdir -p "$em"
+    scpc fit --print-model-yaml | \
+        combine-yaml-files --quiet --nested \
+            - "conf/model.$model.yaml" "$em/model.yaml"
+    ((only)) && exit 0
+fi
+
 if [ ! -f "$em/best.ckpt" ]; then
     echo "Training $model model"
     scpc \
         fit \
-            --read-model-yaml "conf/model.$model.yaml" \
+            --read-model-yaml "$em/model.yaml" \
             "$dlf/train_clean_100_train_subset" \
             "$dlf/train_clean_100_test_subset" \
-            @conf/trainer.args.txt \
-            "--default_root_dir=$exp" \
+            --root-dir "$exp" \
             "--version=$ver" $xtra_args
     [ -f "$em/best.ckpt" ] || exit 1
     ((only)) && exit 0
@@ -276,7 +293,7 @@ NR != FNR {if ($1 == "feature_size:") $2=spf; print}' \
 BEGIN {sd="\"my great model\""}
 NR == FNR && $1 == "system_description:" {$1=""; split($0, x, "#"); sd=x[1]}
 NR != FNR {if ($1 == "system_description:") $2=sd; print}
-' conf/{model.$model.yaml,meta.template.yaml} > "$zs/meta.yaml"
+' "$em/model.yaml" conf/meta.template.yaml > "$zs/meta.yaml"
     awk -v "di=$pdl/" -v "do_=$zs/" '{$1="\""di$1"\""; $2="\""do_$2"\""; print}' \
         resources/libri_to_abxLS.map | xargs -P $nproc -I{} sh -c 'cp -f {}'
     touch "$zs/.complete"

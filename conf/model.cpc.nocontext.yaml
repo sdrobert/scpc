@@ -3,8 +3,9 @@ system_description: "CPC with only the convolutions and transformer predictor"
 context_type: id
 conv:
   output_size: 256
-  norm_type: batch
+  norm_type: channel
 training:
+  num_devices: 4
   data:
     common:
       batch_size: 3

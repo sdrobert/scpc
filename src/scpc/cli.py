@@ -62,9 +62,19 @@ def main(args: Optional[Sequence[str]] = None):
         read_format_str="--read-model-{file_format}",
         print_format_str="--print-model-{file_format}",
     )
-    pl.Trainer.add_argparse_args(fit_parser)
     fit_parser.add_argument(
         "--num-workers", type=int, default=None, help="Number of workers in datasets"
+    )
+    fit_parser.add_argument(
+        "--no-progress-bar",
+        action="store_true",
+        default=False,
+        help="Suppress progress bar",
+    )
+    fit_parser.add_argument(
+        "--root-dir",
+        default=None,
+        help="The root experiment directory. Defaults to current working directory",
     )
 
     predict_parser = subparsers.add_parser(
@@ -101,7 +111,8 @@ def main(args: Optional[Sequence[str]] = None):
 
     if options.cmd == "fit":
         lpf = LightningPretrainedFrontend.from_argparse_args(options)
-        dparams = lpf.params.training.data
+        tparams = lpf.params.training
+        dparams = tparams.data
         assert dparams is not None
         if dparams.train_dir is not None:
             logging.getLogger("pytorch_lightning").warn(
@@ -122,12 +133,12 @@ def main(args: Optional[Sequence[str]] = None):
             suppress_alis=False,
             tokens_only=False,
             suppress_uttids=False,
-            shuffle=None,
+            shuffle=tparams.shuffle,
             num_workers=options.num_workers,
             warn_on_missing=False,
             on_uneven_distributed="raise",
         )
-        root_dir = options.default_root_dir
+        root_dir = options.root_dir
         if root_dir is None:
             root_dir = os.getcwd()
         model_name = lpf.params.name
@@ -142,13 +153,23 @@ def main(args: Optional[Sequence[str]] = None):
         os.makedirs(model_dir, exist_ok=True)
         cc = ModelCheckpoint(model_dir, save_last=True)
         callbacks = [cc]
-        if options.enable_progress_bar:
+        enable_progress_bar = not options.no_progress_bar
+        if enable_progress_bar:
             callbacks.append(RichProgressBar())
         logger_dir = os.path.join(root_dir, "tb_logs")
         os.makedirs(logger_dir, exist_ok=True)
         logger = TensorBoardLogger(logger_dir, model_name, options.version)
-        trainer: pl.Trainer = pl.Trainer.from_argparse_args(
-            options, replace_sampler_ddp=False, callbacks=callbacks, logger=logger
+        trainer = pl.Trainer(
+            logger=logger,
+            callbacks=callbacks,
+            default_root_dir=root_dir,
+            replace_sampler_ddp=False,
+            accelerator=tparams.accelerator,
+            strategy="ddp" if tparams.num_devices else None,
+            devices=tparams.num_devices if tparams.num_devices else 1,
+            num_nodes=tparams.num_nodes,
+            max_epochs=tparams.max_epochs,
+            enable_progress_bar=enable_progress_bar,
         )
         trainer.fit(lpf, data, ckpt_path="last")
         # require training to have finished before saving
