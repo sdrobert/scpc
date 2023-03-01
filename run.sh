@@ -16,7 +16,7 @@ Options
  -$MDL_FLG {${!MDL2FT[*]}}  
                      Model to train (default: $model)
  -$VER_FLG I                Non-negative integer version number (default: $ver)
- -$PRC_FLG N                Number of threads to spawn in bash pipes
+ -$PRC_FLG N                Number of workers in multiprocessing
                     (default: $p)
  -$LIB_FLG DIR              Directory of where librispeech has been
                      downloaded (default: downloads into
@@ -237,7 +237,7 @@ for x in train test; do
     if [ ! -f "$dlf/train_clean_100_${x}_subset/.complete" ]; then
         echo "Making $x subset of train_clean_100"
         rm -rf "$dlf/train_clean_100_${x}_subset"
-        subset-torch-spect-data-dir \
+        subset-torch-spect-data-dir --num-workers=$nproc \
             "$dlf/train_clean_100"{,_${x}_subset} \
             --utt-list-file resources/train_clean_100_${x}_subset.txt
         touch "$dlf/train_clean_100_${x}_subset/.complete"
@@ -262,7 +262,7 @@ if [ ! -f "$em/best.ckpt" ]; then
             "$dlf/train_clean_100_train_subset" \
             "$dlf/train_clean_100_test_subset" \
             --root-dir "$exp" \
-            "--version=$ver" $xtra_args
+            "--version=$ver" "--num-workers=$nproc" $xtra_args
     [ -f "$em/best.ckpt" ] || exit 1
     ((only)) && exit 0
 fi

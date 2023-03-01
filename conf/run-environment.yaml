@@ -23,7 +23,7 @@ dependencies:
   - sentencepiece
   - setuptools
   - setuptools_scm
-  - tensorboard
+  - tensorboardx
   - torchaudio 0.13.1
   - virtual-dataset
   - zerospeech-benchmarks
