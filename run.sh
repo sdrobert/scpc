@@ -246,6 +246,12 @@ for x in train test; do
 done
 
 if [ ! -f "$em/model.yaml" ]; then
+    # this first step ensures conf/model.$model.yaml can be read as-is by
+    # the scpc command. The second joins all the default configuration values
+    # with the modified ones. The latter ensures the model always trains with
+    # a specific configuration, even if the defaults are changed later.
+    echo "Checking configuration conf/model.$model.yaml parses"
+    scpc fit --read-model-yaml "conf/model.$model.yaml" -h > /dev/null
     echo "Writing $model configuration to $em/model.yaml"
     mkdir -p "$em"
     scpc fit --print-model-yaml | \
