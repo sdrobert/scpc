@@ -156,7 +156,11 @@ if [ -z "$libri" ] &&  [ ! -f "$dl/.complete" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.complete" ]; then
         echo "Downloading librispeech"
-        $cmd_p python prep/librispeech.py "$dl" download
+        $cmd_p python prep/librispeech.py "$dl" download \
+            --files \
+                {test,dev}-{clean,other}.tar.gz \
+                train-clean-100.tar.gz \
+                librispeech-vocab.txt
         touch "$libri/.complete"
         ((only)) && exit 0
     fi
