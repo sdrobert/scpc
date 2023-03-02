@@ -10,7 +10,7 @@ set -e
 
 source scripts/cc_env.sh
 
-P="${SLURM_CPUS_PER_TASK:-4}"
-env
+P="${SLURM_TASKS_PER_NODE:-1}"
+W="${SLURM_CPUS_PER_TASK:-4}"
 
-srun bash ./run.sh "$@" -p "$P" -x "--no-progress-bar"
+source ./run.sh "$@" -p "$P" -w "$W" -x "--no-progress-bar"

@@ -4,20 +4,25 @@ source scripts/utils.sh
 
 usage () {
     local ret="${1:-1}"
-    echo -e "Usage: $0 [-${HLP_FLG}|${OLY_FLG}] [-$DAT_FLG DIR] [-$EXP_FLG DIR] [-$MDL_FLG MDL] [-$VER_FLG I] [-$PRC_FLG N] [-$LIB_FLG DIR]"
+    echo -e "Usage: $0 [-${HLP_FLG}|${OLY_FLG}|${SRN_FLG}] [-$DAT_FLG DIR]" \
+        "[-$EXP_FLG DIR] [-$MDL_FLG MDL] [-$VER_FLG I] [-$PRC_FLG N]"\
+        "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"
     if ((ret == 0)); then
         IFS=","
         cat << EOF 1>&2
 Options
  -$HLP_FLG                  Display this message and exit
  -$OLY_FLG                  Perform only one step and return
+ -$SRN_FLG                  Prefix work-heavy commands with "srun" (i.e.
+                            when running nested in an sbatch command)
  -$DAT_FLG DIR              Root data directory (default: $data)
  -$EXP_FLG DIR              Root experiment directory (defalt: $exp)
  -$MDL_FLG {${!MDL2FT[*]}}  
                      Model to train (default: $model)
  -$VER_FLG I                Non-negative integer version number (default: $ver)
- -$PRC_FLG N                Number of workers in multiprocessing
+ -$PRC_FLG N                Number of processes to spawn in multi-threaded task
                     (default: $p)
+ -$WRK_FLG N                Number of workers per process
  -$LIB_FLG DIR              Directory of where librispeech has been
                      downloaded (default: downloads into
                      $data/librispeech/local/data)
@@ -30,11 +35,13 @@ EOF
 # constants
 HLP_FLG=h
 OLY_FLG=o
+SRN_FLG=s
 DAT_FLG=d
 EXP_FLG=e
 MDL_FLG=m
 VER_FLG=v
 PRC_FLG=p
+WRK_FLG=w
 LIB_FLG=l
 XTR_FLG=x
 declare -A FT2ARGS=(
@@ -78,16 +85,23 @@ model="cpc.deft"
 libri=
 ver=0
 nproc=1
+nwork=4
 only=0
 xtra_args=
+cmd=
+cmd_p=
 
-while getopts "${HLP_FLG}${OLY_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${LIB_FLG}:${XTR_FLG}:" opt; do
+while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:" opt; do
     case $opt in
         ${HLP_FLG})
             usage 0
             ;;
         ${OLY_FLG})
             only=1
+            ;;
+        ${SRN_FLG})
+            cmd="srun -- "
+            cmd_p="srun --ntasks=1 -- "
             ;;
         ${DAT_FLG})
             argcheck_is_writable $opt "$OPTARG"
@@ -108,6 +122,10 @@ while getopts "${HLP_FLG}${OLY_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:$
         ${PRC_FLG})
             argcheck_is_nat $opt "$OPTARG"
             nproc="$OPTARG"
+            ;;
+        ${WRK_FLG})
+            argcheck_is_nat $opt "$OPTARG"
+            nwork="$OPTARG"
             ;;
         ${LIB_FLG})
             argcheck_is_readable $opt "$OPTARG"
@@ -138,7 +156,7 @@ if [ -z "$libri" ] &&  [ ! -f "$dl/.complete" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.complete" ]; then
         echo "Downloading librispeech"
-        python prep/librispeech.py "$dl" download
+        $cmd_p python prep/librispeech.py "$dl" download
         touch "$libri/.complete"
         ((only)) && exit 0
     fi
@@ -149,23 +167,23 @@ if [ ! -f "$dz/.complete" ]; then
     # as the librispeech dev/test partitions, just fewer of them and of WAV
     # format.
     echo "Downloading zerospeech abxLS"
-    zrc datasets:pull abxLS-dataset
+    $cmd_p zrc datasets:pull abxLS-dataset
     touch "$dz/.complete"
     ((only)) && exit 0
 fi
 
 if [ ! -f "$dl/.complete" ]; then
     echo "Performing common prep of librispeech"
-    python prep/librispeech.py "$dl" preamble \
+    $cmd_p python prep/librispeech.py "$dl" preamble \
         --speakers-are-readers --exclude-subsets "$libri"
-    python prep/librispeech.py "$dl" init_word "$libri"
+    $cmd_p python prep/librispeech.py "$dl" init_word "$libri"
     touch "$dl/.complete"
     ((only)) && exit 0
 fi
 
 if [ ! -f "$dlf/.complete" ]; then
     echo "Computing $ft features of librispeech"
-    python prep/librispeech.py \
+    $cmd_p python prep/librispeech.py \
         "$dl" torch_dir wrd $ft ${FT2ARGS[$ft]} --compute-up-to=100
     touch "$dlf/.complete"
     ((only)) && exit 0
@@ -200,7 +218,7 @@ printf "\n";
         }
     fi
     for i in $(seq 1 $nproc); do
-        unzip -cq resources/converted_aligned_phones.zip | \
+        $cmd_p unzip -cq resources/converted_aligned_phones.zip | \
             align2frames | \
             write-table-to-torch-dir \
                 -i iv -o long \
@@ -224,7 +242,7 @@ fi
 if [ ! -f "$dlf/ext/train_clean_100.info.ark" ]; then
     echo "Fixing alignments and getting info file"
     failed=0
-    get-torch-spect-data-dir-info --fix ${FT2PAD[$ft]} \
+    $cmd_p get-torch-spect-data-dir-info --fix ${FT2PAD[$ft]} \
         "$dlf/"{train_clean_100,ext/train_clean_100.info.ark} || failed=1
     if ((falied)); then
         rm -f "$dlf/ext/train_clean_100.info.ark"
@@ -237,7 +255,7 @@ for x in train test; do
     if [ ! -f "$dlf/train_clean_100_${x}_subset/.complete" ]; then
         echo "Making $x subset of train_clean_100"
         rm -rf "$dlf/train_clean_100_${x}_subset"
-        subset-torch-spect-data-dir --num-workers=$nproc \
+        $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
             "$dlf/train_clean_100"{,_${x}_subset} \
             --utt-list-file resources/train_clean_100_${x}_subset.txt
         touch "$dlf/train_clean_100_${x}_subset/.complete"
@@ -251,10 +269,10 @@ if [ ! -f "$em/model.yaml" ]; then
     # with the modified ones. The latter ensures the model always trains with
     # a specific configuration, even if the defaults are changed later.
     echo "Checking configuration conf/model.$model.yaml parses"
-    scpc fit --read-model-yaml "conf/model.$model.yaml" -h > /dev/null
+    $cmd_p scpc fit --read-model-yaml "conf/model.$model.yaml" -h > /dev/null
     echo "Writing $model configuration to $em/model.yaml"
     mkdir -p "$em"
-    scpc fit --print-model-yaml | \
+    $cmd_p scpc fit --print-model-yaml | \
         combine-yaml-files --quiet --nested \
             - "conf/model.$model.yaml" "$em/model.yaml"
     ((only)) && exit 0
@@ -262,13 +280,13 @@ fi
 
 if [ ! -f "$em/best.ckpt" ]; then
     echo "Training $model model"
-    scpc \
+    $cmd scpc \
         fit \
             --read-model-yaml "$em/model.yaml" \
             "$dlf/train_clean_100_train_subset" \
             "$dlf/train_clean_100_test_subset" \
             --root-dir "$exp" \
-            "--version=$ver" "--num-workers=$nproc" $xtra_args
+            "--version=$ver" "--num-workers=$nwork" $xtra_args
     [ -f "$em/best.ckpt" ] || exit 1
     ((only)) && exit 0
 fi
@@ -277,7 +295,7 @@ for x in dev_clean dev_other test_clean test_other; do
     if [ ! -f "$pdl/$x/.complete" ]; then
         echo "Computing predictions for $x parition using $model model"
         mkdir -p "$pdl/$x"
-        scpc \
+        $cmd_p scpc \
             predict --numpy --device=cuda \
             "$em/best.ckpt" "$dlf/$x" "$pdl/$x"
         touch "$pdl/$x/.complete"
@@ -288,20 +306,20 @@ done
 if [ ! -f "$zs/.complete" ]; then
     echo "Constructing abxLS zerospeech submission using $model model"
     rm -rf "$zs"
-    zrc submission:init abxLS "$zs"
-    scpc info "$em/best.ckpt" | \
+    $cmd_p zrc submission:init abxLS "$zs"
+    $cmd_p scpc info "$em/best.ckpt" | \
         awk -v denom=${FT2DENOM[$ft]} '
 BEGIN {spf=0}
 NR == FNR && $1 == "downsampling_factor" {spf=$2 / denom}
 NR != FNR {if ($1 == "feature_size:") $2=spf; print}' \
             - conf/params.template.yaml > "$zs/params.yaml"
-    awk '
+    $cmd_p awk '
 BEGIN {sd="\"my great model\""}
 NR == FNR && $1 == "system_description:" {$1=""; split($0, x, "#"); sd=x[1]}
 NR != FNR {if ($1 == "system_description:") $2=sd; print}
 ' "$em/model.yaml" conf/meta.template.yaml > "$zs/meta.yaml"
     awk -v "di=$pdl/" -v "do_=$zs/" '{$1="\""di$1"\""; $2="\""do_$2"\""; print}' \
-        resources/libri_to_abxLS.map | xargs -P $nproc -I{} sh -c 'cp -f {}'
+        resources/libri_to_abxLS.map | xargs -P $nwork -I{} sh -c 'cp -f {}'
     touch "$zs/.complete"
     find "$pdl" -name '*.npy' -delete  # we don't need these anymore
     ((only)) && exit 0
@@ -309,7 +327,7 @@ fi
 
 if [ ! -f "$zs/scores/.complete" ]; then
     echo "Scoring abxLS zerospeech submissing using $model model"
-    zrc benchmarks:run abxLS "$zs"
+    $cmd_p zrc benchmarks:run abxLS "$zs"
     touch "$zs/scores/.complete"
     ((only)) && exit 0
 fi
