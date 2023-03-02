@@ -13,4 +13,4 @@ source scripts/cc_env.sh
 P="${SLURM_TASKS_PER_NODE:-1}"
 W="${SLURM_CPUS_PER_TASK:-4}"
 
-source ./run.sh "$@" -p "$P" -w "$W" -x "--no-progress-bar"
+source ./run.sh "$@" -s -p "$P" -w "$W" -x "--no-progress-bar"
