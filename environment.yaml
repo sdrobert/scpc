@@ -3,6 +3,7 @@ channels:
   - pytorch
   - nvidia
   - conda-forge
+  - coml
   - sdrobert
 dependencies:
   - ipython
@@ -29,5 +30,5 @@ dependencies:
   - zerospeech-benchmarks
   - zerospeech-libriabx2
   - zerospeech-tde
-  # - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
-  #   - "git+https://github.com/sdrobert/pydrobert-pytorch.git"
+  - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
+    - "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc"

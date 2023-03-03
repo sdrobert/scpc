@@ -15,7 +15,7 @@ If you want to follow the recipe in [run.sh](run.sh), clone this repo, then
 
 ``` sh
 git submodule update --init  # populates prep and s3prl
-conda env create -f conf/run-environment.yaml
+conda env create -f environment.yaml
 conda activate scpc
 pip install .
 ```

@@ -3,13 +3,15 @@
     "**/data": true,
     "**/exp": true,
     "data/": true,
-    "exp/": true
+    "exp/": true,
+    ".micromamba/": true,
   },
   "search.exclude": {
     "**/data": true,
     "**/exp": true,
     "data/": true,
-    "exp/": true
+    "exp/": true,
+    ".micromamba/": true,
   },
   "python.analysis.exclude": [
     "**/data",
