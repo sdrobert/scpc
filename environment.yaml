@@ -24,7 +24,7 @@ dependencies:
   - sentencepiece
   - setuptools
   - setuptools_scm
-  - tensorboardx
+  - tensorboard
   - torchaudio 0.13.1
   - virtual-dataset
   - zerospeech-benchmarks
