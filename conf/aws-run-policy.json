@@ -1,0 +1,33 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:AttachVolume",
+                "ec2:DeleteVolume",
+                "ec2:CancelSpotFleetRequests",
+                "ec2:CreateTags",
+                "ec2:CreateSnapshot",
+                "ec2:CreateVolume"
+            ],
+            "Resource": [
+                "arn:aws:ec2:<AWS_REGION>:<AWS_ACCOUNT_ID>:spot-fleet-request/*",
+                "arn:aws:ec2:<AWS_REGION>:<AWS_ACCOUNT_ID>:instance/*",
+                "arn:aws:ec2:<AWS_REGION>:<AWS_ACCOUNT_ID>:volume/*"
+            ]
+        },
+        {
+            "Sid": "VisualEditor1",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:DescribeVolumeStatus",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeSpotInstanceRequests",
+                "ec2:DescribeSnapshots"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

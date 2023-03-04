@@ -133,3 +133,4 @@ data
 exp
 _version.py
 env
+aws_private

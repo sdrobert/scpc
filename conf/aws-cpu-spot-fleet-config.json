@@ -1,0 +1,22 @@
+{
+    "TargetCapacity": 1,
+    "AllocationStrategy": "lowestPrice",
+    "IamFleetRole": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${FLEET_ROLE_NAME}",
+    "LaunchTemplateConfigs": [
+        {
+            "LaunchTemplateSpecification": {
+                "LaunchTemplateName": "${CPU_LAUNCH_TEMPLATE}",
+                "Version": 1
+            },
+            "Overrides": [
+                {
+                    "UserData": "${user_data}",
+                    "IamInstanceProfile": {
+                        "Arn": "arn:aws:iam::${AWS_ACCOUNT_ID}:instance-profile/${ROLE_NAME}"
+                    }
+                }
+            ]
+        }
+    ]
+}
+  

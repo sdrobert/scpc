@@ -1,0 +1,24 @@
+{
+    "ImageId": "$IMAGE_ID",
+    "KeyName": "$KEY_NAME",
+    "SecurityGroupIds": [
+        "$SECURITY_GROUP_ID"
+    ],
+    "InstanceMarketOptions": {
+        "MarketType": "spot"
+    },
+    "InstanceRequirements": {
+        "VCpuCount": {
+            "Min": 0
+        },
+        "MemoryMiB": {
+            "Min": 16000
+        },
+        "AcceleratorCount": {
+            "Min": 4
+        },
+        "AcceleratorManufacturers": [
+            "nvidia"
+        ]
+    }
+}
