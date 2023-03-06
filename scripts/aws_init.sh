@@ -88,8 +88,8 @@ aws iam attach-role-policy \
      --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole \
      --role-name "$FLEET_ROLE_NAME"
 
-# upload gpu and cpu templates
-aws ec2 create-launch-template --launch-template-name "$CPU_LAUNCH_TEMPLATE_NAME" --launch-template-data "$(build_private_version conf/aws-cpu-launch-template.json)"
-aws ec2 create-launch-template --launch-template-name "$GPU_LAUNCH_TEMPLATE_NAME" --launch-template-data "$(build_private_version conf/aws-gpu-launch-template.json)"
+# run a cpu step
+aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-cpu-spot-fleet-config.json -o)"
 
-aws ec2 create-spot-f
+# run a gpu step
+aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-gpu-spot-fleet-config.json -o)"
