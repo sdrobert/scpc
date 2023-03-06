@@ -6,11 +6,12 @@
         {
             "LaunchTemplateSpecification": {
                 "LaunchTemplateName": "${GPU_LAUNCH_TEMPLATE_NAME}",
-                "Version": 1
+                "Version": "1"
             },
             "Overrides": [
                 {
                     "UserData": "${user_data}",
+                    "AvailabilityZone": "${AWS_ZONES}",
                     "IamInstanceProfile": {
                         "Arn": "arn:aws:iam::${AWS_ACCOUNT_ID}:instance-profile/${ROLE_NAME}"
                     }

@@ -10,18 +10,7 @@
                 "ec2:CancelSpotFleetRequests",
                 "ec2:CreateTags",
                 "ec2:CreateSnapshot",
-                "ec2:CreateVolume"
-            ],
-            "Resource": [
-                "arn:aws:ec2:<AWS_REGION>:<AWS_ACCOUNT_ID>:spot-fleet-request/*",
-                "arn:aws:ec2:<AWS_REGION>:<AWS_ACCOUNT_ID>:instance/*",
-                "arn:aws:ec2:<AWS_REGION>:<AWS_ACCOUNT_ID>:volume/*"
-            ]
-        },
-        {
-            "Sid": "VisualEditor1",
-            "Effect": "Allow",
-            "Action": [
+                "ec2:CreateVolume",
                 "ec2:DescribeVolumeStatus",
                 "ec2:DescribeVolumes",
                 "ec2:DescribeSpotInstanceRequests",

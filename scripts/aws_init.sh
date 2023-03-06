@@ -16,14 +16,15 @@ exit 0
 
 # other, less-sensitive stuff
 ROLE_NAME=scpc-run
-FLEET_ROLE_NAME=scpc-run-fleet
+FLEET_ROLE_NAME=aws-ec2-spot-fleet-tagging-role
 POLICY_NAME=scpc-run-policy
 GPU_LAUNCH_TEMPLATE_NAME=scpc-spot-template-gpu
 CPU_LAUNCH_TEMPLATE_NAME=scpc-spot-template-cpu
 VOL_SIZE=200
+AWS_ZONES="$(aws ec2 describe-availability-zones --query "AvailabilityZones[?RegionName=='$AWS_REGION'].ZoneName" --output text | tr $'\t' ',')"
 CPU_INSTANCE_TYPE=m4.xlarge
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
-IMAGE_ID=$(aws ec2 describe-images --region $AWS_REGION --owners amazon --filters 'Name=name,Values=Deep Learning AMI GPU PyTorch 1.13.? (Ubuntu 20.04) ????????' 'Name=state,Values=available' --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' --output text)
+IMAGE_ID=$(aws ec2 describe-images --region $AWS_REGION --owners amazon --filters 'Name=name,Values=Deep Learning AMI GPU PyTorch 1.13.? (Amazon Linux 2) ????????' 'Name=state,Values=available' --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' --output text)
 
 # this script injects variable values into template files, printing to stdout
 build_private_version() {
@@ -41,7 +42,7 @@ build_private_version() {
     {
         export SECURITY_GROUP_ID KEY_NAME AWS_REGION VOL_SIZE IMAGE_ID
         export user_data ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME
-        export GPU_LAUNCH_TEMPLATE_NAME CPU_LAUNCH_TEMPLATE_NAME
+        export GPU_LAUNCH_TEMPLATE_NAME CPU_LAUNCH_TEMPLATE_NAME AWS_ZONES
         cat "$inf" | envsubst
     }
 }
@@ -54,7 +55,7 @@ aws ec2 attach-volume --volume-id $volume_id --instance-id $instance_id --device
 public_dns_name=$(aws ec2 describe-instances --query "Reservations[].Instances[?InstanceId=='$instance_id'].PublicDnsName" --output text)
 
 # SSH into the instance with a command like this...
-ssh -i "$KEY_NAME" "ubuntu@$public_dns_name"
+ssh -i "$KEY_NAME" "ec2-user@$public_dns_name"
 # ... then set up the data like this
 sudo mount /dev/xvdf /scpc-artifacts
 mkdir -p /scpc-artifacts/{data,exp}
@@ -70,21 +71,25 @@ source scripts/aws_env.sh
 # of the lack of GPUs
 ./run.sh
 # disconnect from the shell and terminate the ec2 instance
-aws ec2 terminate-instances --instance-ids $instance_id --output text
+aws ec2 terminate-instances --instance-ids "$instance_id" --output text
 
 # create the relevant roles
-aws iam create-role --role-name $ROLE_NAME --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+aws iam create-role --role-name "$ROLE_NAME" --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 aws iam create-policy \
     --policy-name "$POLICY_NAME"  \
     --policy-document "$(build_private_version "conf/aws-run-policy.json")"
 aws iam attach-role-policy \
-    --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$POLICY_NAME \
-    --role-name $ROLE_NAME
+    --policy-arn "arn:aws:iam::$AWS_ACCOUNT_ID:policy/$POLICY_NAME" \
+    --role-name "$ROLE_NAME"
 aws iam create-role \
-     --role-name $FLEET_ROLE_NAME \
+     --role-name "$FLEET_ROLE_NAME" \
      --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"Service":"spotfleet.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 aws iam attach-role-policy \
      --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole \
-     --role-name $FLEET_ROLE_NAME
+     --role-name "$FLEET_ROLE_NAME"
 
 # upload gpu and cpu templates
+aws ec2 create-launch-template --launch-template-name "$CPU_LAUNCH_TEMPLATE_NAME" --launch-template-data "$(build_private_version conf/aws-cpu-launch-template.json)"
+aws ec2 create-launch-template --launch-template-name "$GPU_LAUNCH_TEMPLATE_NAME" --launch-template-data "$(build_private_version conf/aws-gpu-launch-template.json)"
+
+aws ec2 create-spot-f
