@@ -1,4 +1,4 @@
-#! /usr/bin/bash
+#! /usr/bin/env bash
 
 exit 0
 # the below aren't meant to be run exactly as-is. I didn't run them this way.
@@ -18,11 +18,10 @@ exit 0
 ROLE_NAME=scpc-run
 FLEET_ROLE_NAME=aws-ec2-spot-fleet-tagging-role
 POLICY_NAME=scpc-run-policy
-GPU_LAUNCH_TEMPLATE_NAME=scpc-spot-template-gpu
-CPU_LAUNCH_TEMPLATE_NAME=scpc-spot-template-cpu
+VOLUME_TAG=scpc-artifacts
+SNAPSHOT_TAG=scpc-snapshots
 VOL_SIZE=200
 AWS_ZONES="$(aws ec2 describe-availability-zones --query "AvailabilityZones[?RegionName=='$AWS_REGION'].ZoneName" --output text | tr $'\t' ',')"
-CPU_INSTANCE_TYPE=m4.xlarge
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 IMAGE_ID=$(aws ec2 describe-images --region $AWS_REGION --owners amazon --filters 'Name=name,Values=Deep Learning AMI GPU PyTorch 1.13.? (Amazon Linux 2) ????????' 'Name=state,Values=available' --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' --output text)
 
@@ -38,40 +37,18 @@ build_private_version() {
         echo -e "Arguments $* cannot contain ' character"
         return 1
     fi
-    local user_data="$(awk -v args="$(printf " '%s' " "$@")" '{gsub("<RUN_ARGS>", args); print}' scripts/aws_run.sh | base64 -w0)"
+    local user_data="$(awk -v args="$(printf " '%s' " "$@")" -v vol_tag="${VOLUME_TAG}" -v snap_tag="${SNAPSHOT_TAG}" '{gsub("<RUN_ARGS>", args); gsub("<VOLUME_TAG>", vol_tag); gsub("<SNAPSHOT_TAG>", snap_tag); print}' scripts/aws_run.sh | base64 -w0)"
     {
         export SECURITY_GROUP_ID KEY_NAME AWS_REGION VOL_SIZE IMAGE_ID
-        export user_data ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME
+        export user_data ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME VOLUME_TAG
         export GPU_LAUNCH_TEMPLATE_NAME CPU_LAUNCH_TEMPLATE_NAME AWS_ZONES
+        export SNAPSHOT_TAG
         cat "$inf" | envsubst
     }
 }
 
-# populate the database and compute features
-instance_id=$(aws ec2 run-instances --image-id $IMAGE_ID --count 1 --security-group-ids "$SECURITY_GROUP_ID" --instance-type "$CPU_INSTANCE_TYPE" --key-name "$KEY_NAME" --query "Instances[0].InstanceId" --output text)
-instance_az=$(aws ec2 describe-instances --query "Reservations[].Instances[?InstanceId=='$instance_id'].Placement.AvailabilityZone" --output text)
-volume_id=$(aws ec2 create-volume --size $VOL_SIZE --region $AWS_REGION --availability-zone $instance_az --volume-type gp2 --tag-specifications 'ResourceType=volume,Tags=[{Key=Name,Value=scpc-artifacts}]' --query "VolumeId" --output text)
-aws ec2 attach-volume --volume-id $volume_id --instance-id $instance_id --device /dev/sdf
-public_dns_name=$(aws ec2 describe-instances --query "Reservations[].Instances[?InstanceId=='$instance_id'].PublicDnsName" --output text)
-
-# SSH into the instance with a command like this...
-ssh -i "$KEY_NAME" "ec2-user@$public_dns_name"
-# ... then set up the data like this
-sudo mount /dev/xvdf /scpc-artifacts
-mkdir -p /scpc-artifacts/{data,exp}
-git clone https://github.com/sdrobert/scpc.git
-cd scpc
-git submodule update --init
-ln -s $(cd /scpc-artifacts/data; pwd -P)
-ln -s $(cd /scpc-artifacts/exp; pwd -P)
-source scripts/aws_env.sh
-# you can run step-by-step with the -o flag until you've made the
-# train_clean_100_train_subset and train_clean_100_test_subset, or you can
-# just run until you inevitably fail when you hit the model fitting part b/c
-# of the lack of GPUs
-./run.sh
-# disconnect from the shell and terminate the ec2 instance
-aws ec2 terminate-instances --instance-ids "$instance_id" --output text
+# create the volume
+aws ec2 create-volume --size $VOL_SIZE --region $AWS_REGION --availability-zone "${AWS_ZONES%%,*}" --volume-type gp2 --tag-specifications "ResourceType=volume,Tags=[{Key=Name,Value=${VOLUME_TAG}}]"
 
 # create the relevant roles
 aws iam create-role --role-name "$ROLE_NAME" --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
