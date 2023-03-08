@@ -300,7 +300,7 @@ for x in dev_clean dev_other test_clean test_other; do
         echo "Computing predictions for $x parition using $model model"
         mkdir -p "$pdl/$x"
         $cmd_p scpc \
-            predict --numpy --device=cuda \
+            predict --numpy \
             "$em/best.ckpt" "$dlf/$x" "$pdl/$x"
         touch "$pdl/$x/.complete"
         ((only)) && exit 0
