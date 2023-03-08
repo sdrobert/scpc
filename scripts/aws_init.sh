@@ -68,5 +68,5 @@ aws iam attach-role-policy \
 # run a cpu step
 aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-cpu-spot-fleet-config.json -o)"
 
-# run a gpu step
-aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-gpu-spot-fleet-config.json -o)"
+# run a 4-gpu step
+aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-4gpu-spot-fleet-config.json -o)"
