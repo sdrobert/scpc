@@ -60,8 +60,11 @@ aws ec2 wait volume-available --region "$AWS_REGION" --volume-ids "$volume_id" |
 
 echo "Attaching volume"
 aws ec2 attach-volume \
-    --region "$AWS_REGION" --volume-id "$VOLUME_ID" \
+    --region "$AWS_REGION" --volume-id "$volume_id" \
     --instance-id "$INSTANCE_ID" --device /dev/sdf || do_cleanup
+aws ec2 wait volume-in-use \
+    --region "$AWS_REGION" --volume-id "$volume_id" || do_cleanup
+sleep 1
 
 file_s="$(sudo file -sL /dev/sdf)"
 if [[ "$file_s" =~ 'filesystem' ]]; then
@@ -92,5 +95,5 @@ mkdir -p exp/tb_logs
 tensorboard --logdir=exp/tb_logs &
 
 echo "Running with args ${RUN_ARGS[*]}"
-./run.sh "${RUN_ARGS[@]}"
+./run.sh "${RUN_ARGS[@]}" -x "--no-progress-bar"
 do_cleanup

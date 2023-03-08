@@ -2,7 +2,7 @@ name: cpc.small
 system_description: "CPC-small network"
 conv:
   output_size: 256
-  norm_type: channel
+  norm_type: batch
 recur:
   num_layers: 2
   recurrent_type: lstm
