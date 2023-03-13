@@ -292,6 +292,8 @@ if [ ! -f "$em/best.ckpt" ]; then
             --root-dir "$exp" \
             "--version=$ver" "--num-workers=$nwork" $xtra_args
     [ -f "$em/best.ckpt" ] || exit 1
+    echo "Deleting intermediate checkpoints of $model"
+    find "$em/" -name '*.ckpt' -not -name 'best.ckpt' -delete
     ((only)) && exit 0
 fi
 
