@@ -42,6 +42,7 @@ import numpy as np
 
 __all__ = [
     "CausalSelfAttentionEncoder",
+    "ContiguousTemporalMask",
     "ConvEncoder",
     "CPCLossNetwork",
     "Encoder",
@@ -162,6 +163,42 @@ class ChannelNorm(torch.nn.Module):
         if self.weight is not None:
             x = x * self.weight + self.bias
         return x
+
+
+def contiguous_temporal_mask(
+    x: torch.Tensor, W: int, p: float, std: float
+) -> torch.Tensor:
+    assert x.dim() == 3
+    assert W > 0
+    assert p >= 0
+    N, T, C = x.shape
+    mask = torch.rand(N, C, T + W + 1, device=x.device, dtype=x.dtype).lt_(p)
+    mask = mask.unsqueeze(2).expand(N, C, W, T + W + 1).flatten(1, 2)
+    mask = torch.nn.functional.fold(mask, (1, T + 2 * W), (1, W)).clamp_max_(1.0)
+    mask = mask[..., W:-W].squeeze(2).transpose(1, 2)
+    x = x * (1.0 - mask) + mask * torch.randn_like(x) * std
+    return x
+
+
+class ContiguousTemporalMask(torch.nn.Module):
+    __slots__ = "width", "mask_prob", "std"
+
+    def __init__(
+        self, width: int, mask_prob: float, std: float, correct: bool = True
+    ) -> None:
+        check_positive("width", width)
+        check_positive("mask_prob", mask_prob, True)
+        check_positive("std", std, True)
+        super().__init__()
+        if correct:
+            mask_prob = 1 - (1 - mask_prob) ** (1 / width)
+        self.width, self.mask_prob, self.std = width, mask_prob, std
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.training:
+            return contiguous_temporal_mask(x, self.width, self.mask_prob, self.std)
+        else:
+            return x
 
 
 E = TypeVar("E", bound="Encoder", covariant=True)

@@ -173,3 +173,23 @@ def test_checkpoints(from_class):
     out2, lens2 = encoder2(x, lens)
     assert (lens1 == lens2).all()
     assert torch.allclose(out1, out2)
+
+
+def test_contiguous_temporal_mask():
+    torch.manual_seed(4)
+    N, W, T, C, p, std = 10_000, 5, 100, 5, 0.1, 2.0
+    x = torch.ones(N, T, C)
+    y = ContiguousTemporalMask(W, p, 0.0)(x)
+    assert torch.isclose(y.mean(), torch.tensor(1 - p), atol=1e-3)
+    y = y.transpose(1, 2).flatten(0, 1)
+    for nc, y_nc in enumerate(y):
+        # the left and rightmost windows can be shorter than W
+        uy_nc, counts_nc = torch.cat(
+            [torch.zeros(W), y_nc, torch.zeros(W)]
+        ).unique_consecutive(return_counts=True)
+        for uy_nct, counts_nct in zip(uy_nc, counts_nc):
+            if uy_nct == 0.0:
+                assert counts_nct >= W, nc
+    y = ContiguousTemporalMask(W, 1.0, std)(x)
+    assert torch.isclose(y.mean(), torch.tensor(0.0), atol=1e-3)
+    assert torch.isclose(y.std(), torch.tensor(std), atol=1e-3)
