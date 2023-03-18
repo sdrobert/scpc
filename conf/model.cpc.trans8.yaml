@@ -1,0 +1,19 @@
+name: cpc.trans8
+system_description: "CPC-small but with transfomers and 8-frame window"
+context_type: csa
+conv:
+  output_size: 256
+csa:
+  max_width: 8
+  dim_feedforward: 1024
+training:
+  num_devices: 4
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+    offset: 7
+  chunking:
+    max_chunks: 16
