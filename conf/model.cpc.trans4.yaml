@@ -1,0 +1,19 @@
+name: cpc.trans4
+system_description: "CPC-small but with transfomers and 4-frame window"
+context_type: csa
+conv:
+  output_size: 256
+csa:
+  max_width: 4
+  dim_feedforward: 1024
+training:
+  num_devices: 4
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+    offset: 3
+  chunking:
+    max_chunks: 16

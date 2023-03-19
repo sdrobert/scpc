@@ -1,0 +1,15 @@
+name: cpc.conv
+system_description: "CPC-small without the context network"
+context_type: id
+conv:
+  output_size: 256
+training:
+  num_devices: 4
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+  chunking:
+    max_chunks: 16
