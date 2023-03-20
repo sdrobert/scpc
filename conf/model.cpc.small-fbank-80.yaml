@@ -1,0 +1,21 @@
+name: cpc.small-fbank-80
+system_description: "CPC-small network w/ convolutions replaced with 80-dim fbank + linear layer"
+input_size: 80
+feat_type: fbank-80
+latent_type: ff
+ff:
+  output_size: 256
+recur:
+  num_layers: 2
+  recurrent_type: lstm
+training:
+  num_devices: 4
+  data:
+    common:
+      batch_size: 3
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+  chunking:
+    lobe_size: 127
+    max_chunks: 16

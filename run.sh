@@ -47,14 +47,17 @@ XTR_FLG=x
 declare -A FT2ARGS=(
     [raw]="--raw"
     [fbank]=""
+    [fbank-80]="--computer-json conf/fbank-80-feats.json"
 )
 declare -A FT2PAD=(
     [raw]="399"
     [fbank]="0"
+    [fbank-80]="0"
 )
 declare -A FT2DENOM=(
     [raw]="16000"
     [fbank]="100"
+    [fbank-80]="100"
 )
 declare -A MDL2FT
 for f in conf/model.*.yaml; do
