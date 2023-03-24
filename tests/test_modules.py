@@ -193,3 +193,40 @@ def test_contiguous_temporal_mask():
     y = ContiguousTemporalMask(W, 1.0, std)(x)
     assert torch.isclose(y.mean(), torch.tensor(0.0), atol=1e-3)
     assert torch.isclose(y.std(), torch.tensor(std), atol=1e-3)
+
+
+@pytest.mark.parametrize("offset", [0, 3], ids=["nooffs", "offs"])
+@pytest.mark.parametrize("num_speakers", [None, 5], ids=["nospkrs", "spkrs"])
+def test_best_rq_loss_network_matches_manual_comp(offset, num_speakers):
+    torch.manual_seed(5)
+    N, T, F, C, offset = 100, 30, 5, 8, 0
+    assert T % 2 == 0
+    ff = FeedForwardEncoder(C)
+    feats = torch.randn(N, T, F)
+    lens = torch.randint(1, T // 2 + 1, (N,))
+    context = torch.randn(N, T // 2, C)
+    sources = torch.randint(1 if num_speakers is None else num_speakers, (N,))
+    best_rq = BestRqLossNetwork(2 * F, ff, num_speakers=num_speakers, offset=offset)
+    loss_exp = 0.0
+    for n in range(N):
+        feats_n, lens_n, context_n = feats[n], lens[n], context[n]
+        feats_n = feats_n.view(T // 2, 2 * F)
+        feats_n = torch.nn.functional.normalize(feats_n @ best_rq.proj_matrix)
+        if num_speakers:
+            context_n = context_n + best_rq.embed(sources[n : n + 1])
+        logp_n = torch.nn.functional.log_softmax(ff(context_n)[0], 1)
+        lens_n = lens_n.item()
+        for t in range(offset, lens_n):
+            feats_nt = feats_n[t]
+            target_nt_idx, target_nt_norm = -1, float("inf")
+            for c in range(C):
+                codebook_c = best_rq.codebook[c]
+                target_c_norm = torch.linalg.vector_norm(feats_nt - codebook_c)
+                if n == 0 and t == 12:
+                    print(t, c, target_c_norm)
+                if target_c_norm < target_nt_norm:
+                    target_nt_idx, target_nt_norm = c, target_c_norm
+            loss_exp = loss_exp - logp_n[t, target_nt_idx]
+    loss_exp = loss_exp / (lens - offset).clamp_min_(0).sum().item()
+    loss_act = best_rq(feats, context, lens, sources)
+    assert torch.isclose(loss_exp, loss_act)

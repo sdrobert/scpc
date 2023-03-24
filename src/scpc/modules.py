@@ -41,6 +41,7 @@ import torch
 import numpy as np
 
 __all__ = [
+    "BestRqLossNetwork",
     "CausalSelfAttentionEncoder",
     "ContiguousTemporalMask",
     "ConvEncoder",
@@ -395,6 +396,8 @@ class ConvEncoder(Encoder, json_name="conv"):
         elif norm_style == "batch":
             Norm = lambda: torch.nn.BatchNorm1d(output_size)
         elif norm_style == "instance":
+            # XXX(sdrobert): this should've used an affine form like the channel
+            # normalization.
             Norm = lambda: torch.nn.InstanceNorm1d(
                 output_size, track_running_stats=True
             )
@@ -869,6 +872,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         latent = latent[:, self.offset :]
 
         if self.embed is not None:
+            assert sources is not None, "sources needed for embedding"
             context = context + self.embed(sources).unsqueeze(1)
 
         lens_ = None if lens is None else lens.clamp_max(T - K)
@@ -903,3 +907,74 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
             loss = loss.masked_fill(~mask, 0.0).sum()
             loss = loss / norm
         return loss  # + math.log(M + 1)
+
+
+class BestRqLossNetwork(torch.nn.Module, Generic[E]):
+    __slots__ = "offset"
+
+    prediction_encoder: E
+    offset: int
+
+    def __init__(
+        self,
+        feat_size: int,
+        prediction_encoder: E,
+        vec_size: int = 16,
+        num_speakers: Optional[int] = None,
+        offset: int = 0,
+    ) -> None:
+        check_positive("feat_size", feat_size)
+        check_positive("vec_size", vec_size)
+        check_positive("offset", offset, True)
+        if num_speakers is not None:
+            check_positive("num_speakers", num_speakers)
+        super().__init__()
+        self.prediction_encoder, self.offset = prediction_encoder, offset
+        proj_matrix = torch.empty(feat_size, vec_size)
+        torch.nn.init.xavier_normal_(proj_matrix)
+        self.proj_matrix = torch.nn.Parameter(proj_matrix, False)
+        codebook_size = prediction_encoder.output_size
+        codebook = torch.nn.functional.normalize(torch.randn(codebook_size, vec_size))
+        self.codebook = torch.nn.Parameter(codebook, False)
+        if num_speakers is not None:
+            self.embed = torch.nn.Embedding(num_speakers, prediction_encoder.input_size)
+        else:
+            self.register_module("embed", None)
+        self.loss = torch.nn.CrossEntropyLoss()
+
+    def forward(
+        self,
+        feats: torch.Tensor,
+        context: torch.Tensor,
+        lens: Optional[torch.Tensor] = None,
+        sources: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        assert feats.ndim == context.ndim == 3
+        assert feats.size(0) == context.size(0)
+
+        # we compute context first just in case the prediction encoder downsamples
+        if self.embed is not None:
+            assert sources is not None, "sources needed for embedding"
+            context = context + self.embed(sources).unsqueeze(1)
+        logits, lens = self.prediction_encoder(context, lens)
+        del context
+
+        N, T = logits.shape[:2]
+        assert T > self.offset, "offset too large for sequences"
+        with torch.no_grad():
+            feats = feats.reshape(N, T, -1)  # in case we've downsampled
+            feats = feats[:, self.offset :]
+            assert feats.size(2) == self.proj_matrix.size(0)
+            feats = torch.nn.functional.normalize(feats @ self.proj_matrix, dim=2)
+            norms = torch.linalg.vector_norm(feats.unsqueeze(2) - self.codebook, dim=3)
+            targets = norms.argmin(2)
+            del feats, norms
+            assert targets.shape == (N, T - self.offset)
+            if lens is not None:
+                mask = get_length_mask(targets, lens - self.offset)
+                targets = targets.masked_fill_(~mask, self.loss.ignore_index)
+                del mask
+            targets = targets.flatten()
+
+        logits = logits[:, self.offset :].flatten(0, 1)
+        return self.loss(logits, targets)
