@@ -167,37 +167,53 @@ class ChannelNorm(torch.nn.Module):
 
 
 def contiguous_temporal_mask(
-    x: torch.Tensor, W: int, p: float, std: float
+    x: torch.Tensor, W: int, p: float, mean: Optional[float], std: Optional[float]
 ) -> torch.Tensor:
     assert x.dim() == 3
     assert W > 0
     assert p >= 0
     N, T, C = x.shape
+    if mean is None:
+        mean = x.mean(1, True)
+    if std is None:
+        std = x.std(1, keepdim=True)
     mask = torch.rand(N, C, T + W + 1, device=x.device, dtype=x.dtype).lt_(p)
     mask = mask.unsqueeze(2).expand(N, C, W, T + W + 1).flatten(1, 2)
     mask = torch.nn.functional.fold(mask, (1, T + 2 * W), (1, W)).clamp_max_(1.0)
     mask = mask[..., W:-W].squeeze(2).transpose(1, 2)
-    x = x * (1.0 - mask) + mask * torch.randn_like(x) * std
+    x = x * (1.0 - mask) + mask * (torch.randn_like(x) * std + mean)
     return x
 
 
 class ContiguousTemporalMask(torch.nn.Module):
     __slots__ = "width", "mask_prob", "std"
+    width: int
+    mask_prob: float
+    mean: Optional[float]
+    std: Optional[float]
 
     def __init__(
-        self, width: int, mask_prob: float, std: float, correct: bool = True
+        self,
+        width: int,
+        mask_prob: float,
+        mean: Optional[float] = None,
+        std: Optional[float] = None,
+        correct: bool = True,
     ) -> None:
         check_positive("width", width)
         check_positive("mask_prob", mask_prob, True)
-        check_positive("std", std, True)
+        if std is not None:
+            check_positive("std", std, True)
         super().__init__()
         if correct:
             mask_prob = 1 - (1 - mask_prob) ** (1 / width)
-        self.width, self.mask_prob, self.std = width, mask_prob, std
+        self.width, self.mask_prob, self.mean, self.std = width, mask_prob, mean, std
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training:
-            return contiguous_temporal_mask(x, self.width, self.mask_prob, self.std)
+            return contiguous_temporal_mask(
+                x, self.width, self.mask_prob, self.mean, self.std
+            )
         else:
             return x
 
