@@ -134,6 +134,54 @@ class CPCLossParams(param.Parameterized):
     )
 
 
+class BestRqLossParams(param.Parameterized):
+    mask_prob: float = param.Magnitude(
+        0.01, doc="Per-frame probabilty of temporal mask"
+    )
+    mask_width: int = param.Integer(
+        40, bounds=(1, None), doc="Width (in frames) of temporal mask"
+    )
+    mask_mean: float = param.Number(
+        None, doc="Mean of temporal mask noise. If unspecified, it's per-channel"
+    )
+    mask_std: float = param.Number(
+        None,
+        bounds=(0, None),
+        doc="Stddev of temporal mask noise. If unspecified, it's per-channel",
+    )
+    codebook_size: int = param.Integer(
+        8192, bounds=(1, None), doc="Number of quantized vectors in codebook"
+    )
+    codebook_dim: int = param.Integer(
+        16,
+        bounds=(1, None),
+        doc="Size of quantized vector in codebook",
+    )
+    num_speakers: Optional[int] = param.Integer(
+        None,
+        bounds=(1, None),
+        doc="Number of speakers to construct embeddings for. Source hashes will be "
+        "extracted from utterance ids. Unset means no embeddings used",
+    )
+    offset: int = param.Integer(
+        0,
+        bounds=(0, None),
+        doc="Frame offset from start of utterance/chunk to begin computing loss from",
+    )
+    speaker_regex: str = param.String(
+        r"^lbi-([^-]+)-.*$",
+        doc="Regular expression to extract speaker id from utterance id. Must contain "
+        "one group to be used as the speaker id",
+    )
+    prediction_type: Literal["ff", "recur", "sa", "csa"] = param.ObjectSelector(
+        "ff",
+        ["ff", "recur", "sa", "csa"],
+        doc="Type of prediction network to use. 'ff' is "
+        "a matrix (original); 'recur' is a single-layer LSTM; 'sa' is a transformer; "
+        "'csa' is a causal transformer",
+    )
+
+
 class ChunkingParams(param.Parameterized):
     policy: Literal["fixed", "none", "ali", "ref"] = param.ObjectSelector(
         "fixed",
@@ -195,13 +243,18 @@ class TrainingParams(param.Parameterized):
         ChunkingParams, instantiate=False, doc="Parameters for chunking"
     )
 
-    loss_type: Literal["cpc"] = param.ObjectSelector(
-        "cpc", ["cpc"], doc="Loss to train model with"
+    loss_type: Literal["cpc", "best-rq"] = param.ObjectSelector(
+        "cpc", ["cpc", "best-rq"], doc="Loss to train model with"
     )
     cpc_loss: Optional[CPCLossParams] = param.ClassSelector(
         CPCLossParams,
         instantiate=False,
         doc="Parameters for CPC loss (if loss_type = 'cpc')",
+    )
+    best_rq_loss: Optional[BestRqLossParams] = param.ClassSelector(
+        BestRqLossParams,
+        instantiate=False,
+        doc="Parameters for BEST-RQ loss (if loss_type = 'best-rq')",
     )
 
     accelerator: str = param.String("gpu", doc="Lightning accelerator")
@@ -236,6 +289,8 @@ class TrainingParams(param.Parameterized):
             self.chunking = ChunkingParams(name="chunking")
         if self.cpc_loss is None:
             self.cpc_loss = CPCLossParams(name="cpc_loss")
+        if self.best_rq_loss is None:
+            self.best_rq_loss = BestRqLossParams(name="best_rq_loss")
 
 
 class LightningPretrainedFrontendParams(param.Parameterized):
@@ -324,10 +379,14 @@ class LightningPretrainedFrontend(pl.LightningModule):
     context: Encoder
     slicer: Optional[SliceSpectData]
     chunker: Optional[ChunkBySlices]
+    masker: Optional[ContiguousTemporalMask]
+    cpc_loss: Optional[CPCLossNetwork]
+    best_rq_loss: Optional[BestRqLossNetwork]
 
     _speaker_regex: Optional[re.Pattern[str]]
     _speaker_map: Dict[str, int]
     _speaker_min: int
+    _num_speakers: Optional[int]
 
     def __init__(self, params: LightningPretrainedFrontendParams) -> None:
         super().__init__()
@@ -405,19 +464,20 @@ class LightningPretrainedFrontend(pl.LightningModule):
         else:
             raise NotImplementedError
 
+        self._num_speakers = self._speaker_regex = None
         if params.training.loss_type == "cpc":
+            self.register_module("masker", None)
+            self.register_module("best_rq_loss", None)
             if params.training.cpc_loss is None:
                 raise ValueError("params.training.cpc_loss not initialized")
-            num_speakers = params.training.cpc_loss.num_speakers
-            if num_speakers is not None:
+            self._num_speakers = params.training.cpc_loss.num_speakers
+            if self._num_speakers is not None:
                 self._speaker_regex = re.compile(params.training.cpc_loss.speaker_regex)
                 if self._speaker_regex.groups != 1:
                     raise ValueError(
                         f"expected one group in regex '{self._speaker_regex.pattern}'; "
                         f"got {self._speaker_regex.groups}"
                     )
-            else:
-                self._speaker_regex = None
             if params.training.cpc_loss.prediction_type == "csa":
                 penc = CausalSelfAttentionEncoder(
                     self.context.output_size,
@@ -446,9 +506,75 @@ class LightningPretrainedFrontend(pl.LightningModule):
                 params.training.cpc_loss.prediction_steps,
                 params.training.cpc_loss.negative_samples,
                 penc,
-                num_speakers,
+                self._num_speakers,
                 params.training.dropout_prob,
                 params.training.cpc_loss.offset,
+            )
+        elif params.training.loss_type == "best-rq":
+            self.register_module("cpc_loss", None)
+            if params.training.best_rq_loss is None:
+                raise ValueError("params.training.best_rq_loss not initialized")
+            self._num_speakers = params.training.best_rq_loss.num_speakers
+            if self._num_speakers is not None:
+                self._speaker_regex = re.compile(
+                    params.training.best_rq_loss.speaker_regex
+                )
+                if self._speaker_regex.groups != 1:
+                    raise ValueError(
+                        f"expected one group in regex '{self._speaker_regex.pattern}'; "
+                        f"got {self._speaker_regex.groups}"
+                    )
+            else:
+                self._speaker_regex = None
+            self.masker = ContiguousTemporalMask(
+                params.training.best_rq_loss.mask_width,
+                params.training.best_rq_loss.mask_prob,
+                params.training.best_rq_loss.mask_mean,
+                params.training.best_rq_loss.mask_std,
+            )
+            if params.training.chunking.policy != "fixed" and None in {
+                params.training.best_rq_loss.mask_mean,
+                params.training.best_rq_loss.mask_std,
+            }:
+                logger = logging.getLogger("pytorch_lightning")
+                logger.warn(
+                    f"chunking policy '{params.training.chunking.policy}' != 'fixed', "
+                    "but BEST-RQ mask mean/stddev are being determined dynamically. "
+                    "Computations may be incorrect due to right-padding"
+                )
+            if params.training.best_rq_loss.prediction_type == "csa":
+                penc = CausalSelfAttentionEncoder(
+                    self.context.output_size,
+                    params.training.best_rq_loss.codebook_size,
+                    dropout_prob=params.training.dropout_prob,
+                )
+            elif params.training.best_rq_loss.prediction_type == "sa":
+                penc = SelfAttentionEncoder(
+                    self.context.output_size,
+                    params.training.best_rq_loss.codebook_size,
+                    dropout_prob=params.training.dropout_prob,
+                )
+            elif params.training.best_rq_loss.prediction_type == "recur":
+                penc = RecurrentEncoder(
+                    self.context.output_size,
+                    params.training.best_rq_loss.codebook_size,
+                    recurrent_type="lstm",
+                    dropout_prob=params.training.dropout_prob,
+                )
+            else:
+                penc = FeedForwardEncoder(
+                    self.context.output_size,
+                    params.training.best_rq_loss.codebook_size,
+                    "none",
+                    False,
+                    params.training.dropout_prob,
+                )
+            self.best_rq_loss = BestRqLossNetwork(
+                params.input_size,
+                penc,
+                params.training.best_rq_loss.codebook_dim,
+                self._num_speakers,
+                params.training.best_rq_loss.offset,
             )
         else:
             raise NotImplementedError
@@ -509,17 +635,16 @@ class LightningPretrainedFrontend(pl.LightningModule):
         speakers = torch.empty(len(utt_ids), dtype=torch.long)
         if self._speaker_regex is None:
             return speakers
-        num_speakers = self.params.training.cpc_loss.num_speakers
-        assert num_speakers is not None
+        assert self._num_speakers is not None
         for n, utt_id in enumerate(utt_ids):
             speaker = self._speaker_regex.match(utt_id).group(0)
             id_ = self._speaker_map.get(speaker, None)
             if id_ is None:
                 self._speaker_min += 1
-                if self._speaker_min >= num_speakers:
+                if self._speaker_min >= self._num_speakers:
                     logger = logging.getLogger("pytorch_lightning")
-                    logger.warn(f"number of speakers exceeded {num_speakers}")
-                    self._speaker_min = num_speakers
+                    logger.warn(f"number of speakers exceeded {self._num_speakers}")
+                    self._speaker_min = self._num_speakers
                 id_ = self._speaker_min
             speakers[n] = id_
         return speakers
@@ -529,10 +654,17 @@ class LightningPretrainedFrontend(pl.LightningModule):
         if len(utt_ids) == 0:
             return feats.new_zeros(1)
         speakers = self.get_speakers_from_uttids(utt_ids).to(feats.device)
-        latent, lens = self.latent(feats, feat_sizes)
+        if self.masker is not None:
+            with torch.no_grad():
+                feats_ = self.masker(feats)
+        else:
+            feats_ = feats
+        latent, lens = self.latent(feats_, feat_sizes)
         context, lens = self.context(latent, lens)
         if self.params.training.loss_type == "cpc":
             loss = self.cpc_loss(latent, context, lens, speakers)
+        elif self.params.training.loss_type == "best-rq":
+            loss = self.best_rq_loss(feats, context, lens, speakers)
         else:
             raise NotImplementedError
         return loss
