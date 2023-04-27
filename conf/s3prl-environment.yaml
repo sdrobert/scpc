@@ -4,15 +4,18 @@ channels:
   - nvidia
   - conda-forge
 dependencies:
-  - torchaudio >=0.8.0
-  - pytorch >=1.8.0,!=1.10.0
-  - tqdm >=4.56.0
-  - numpy >=1.21
-  - pyyaml >=5.4.1
+  - editdistance
   - filelock
+  - numpy >=1.21
   - omegaconf >=2.1.1
-  - setuptools 59.5.0
-  - requests
-  - transformers
   - pip
+  - pytorch 1.13.1
+  - pytorch::pytorch-cuda 11.6
+  - pyyaml >=5.4.1
+  - requests
+  - ruamel.yaml
+  - setuptools 59.5.0
   - tensorboardx
+  - torchaudio 0.13.1
+  - tqdm >=4.56.0
+  - transformers
