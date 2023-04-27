@@ -1,9 +1,11 @@
 name: scpc-s3prl
 channels:
+  - sdrobert
   - pytorch
   - nvidia
   - conda-forge
 dependencies:
+  - pydrobert-speech
   - editdistance
   - filelock
   - numpy >=1.21
