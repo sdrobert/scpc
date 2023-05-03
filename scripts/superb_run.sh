@@ -21,15 +21,21 @@ help_message="Evaluate pre-trained model on SUPERB phone rec task"
 source scripts/preamble.sh
 
 ft="${MDL2FT[$model]}"
+
 em="$exp/$model/version_$ver"
 dl="$data/librispeech"
 sp="$em/superb/pr"
 
-mdl="$em/best.ckpt"
-if [ ! -f "$mdl" ]; then
-    echo "Model file '$mdl' doesn't exist. Did you set -$MDL_FLG, -$VER_FLG" \
-         "correctly?"
-    exit 1
+if [[ "$ft" =~ ^superb ]]; then
+    mdl_flags=( )
+else
+    mdl="$em/best.ckpt"
+    if [ ! -f "$mdl" ]; then
+        echo "Model file '$mdl' doesn't exist. Did you set -$MDL_FLG," \
+            "-$VER_FLG correctly?"
+        exit 1
+    fi
+    mdl_flags=( "-k" "$mdl" )
 fi
 
 if [ ! -d "s3prl" ]; then
@@ -67,11 +73,30 @@ if [ ! -f "$sp/config.yaml" ]; then
     ((only)) && exit 0
 fi
 
-$cmd python s3prl/s3prl/run_downstream.py ${FT2SUPERB_ARGS[$ft]} \
-    -u scpc_local \
-    -p "$sp" \
-    -c "$sp/config.yaml" \
-    -k "$mdl" \
-    -m train \
-    -d ctc \
-    -a
+if [ ! -f "$sp/.train_complete" ]; then
+    $cmd python s3prl/s3prl/run_downstream.py ${FT2SUPERB_ARGS[$ft]} \
+        -p "$sp" \
+        -c "$sp/config.yaml" \
+        "${mdl_flags[@]}" \
+        -m train \
+        -d ctc \
+        -a
+    touch "$sp/.train_complete"
+    ((only)) && exit 0
+fi
+
+if [ ! -f "$sp/results.txt" ]; then
+    $cmd python s3prl/s3prl/run_downstream.py \
+        -m evaluate -e "$sp/dev-best.ckpt" | 
+        grep "test per" | tee "$sp/results.txt" || \
+        (rm -f "$sp/results.txt" && exit 1)
+    find "$sp/" \
+        -type f \
+        -and -not -name 'dev-best.ckpt' \
+        -and -not -name 'config.yaml' \
+        -and -not -name '*tfevents*' \
+        -and -not -name '.train_complete' \
+        -and -not -name 'results.txt' \
+        -delete
+    ((only)) && exit 0
+fi

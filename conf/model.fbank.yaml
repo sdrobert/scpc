@@ -2,16 +2,16 @@ name: fbank
 system_description: "41-dim fbank baseline"
 input_size: 41
 feat_type: fbank
-latent_type: ff
+latent_type: id
 context_type: id
 training:
-  num_devices: 4
+  num_devices: 1
   data:
     common:
-      batch_size: 3
+      batch_size: 12
       drop_last: true
   cpc_loss:
-    prediction_type: csa
+    prediction_type: ff
   chunking:
     lobe_size: 127
-    max_chunks: 16
+    max_chunks: 64

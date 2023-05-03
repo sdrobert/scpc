@@ -64,8 +64,10 @@ declare -A FT2DENOM=(
     [fbank-80]="100"
 )
 declare -A FT2SUPERB_ARGS=(
-    [fbank]="-g prep/conf/feats/fbank_41.json"
-    [fbank-80]="-g conf/fbank-80-feats.json"
+    [raw]="-u scpc_local"
+    [fbank]="-u scpc_local -g prep/conf/feats/fbank_41.json"
+    [fbank-80]="-u scpc_local -g conf/fbank-80-feats.json"
+    [superb.fbank]="-u fbank"
 )
 declare -A MDL2FT
 for f in conf/model.*.yaml; do
@@ -87,6 +89,9 @@ done
 if [ -z "${MDL2FT["cpc.deft"]}" ]; then
     echo -e "Missing cpc.deft!"
     exit 1
+fi
+if [[ "$0" =~ "superb_run.sh" ]]; then
+    MDL2FT[superb.fbank]=superb.fbank
 fi
 
 # variables
