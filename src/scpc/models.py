@@ -106,6 +106,11 @@ class CPCLossParams(param.Parameterized):
     prediction_steps: int = param.Integer(
         12, bounds=(1, None), doc="Number of frames ahead to try and predict"
     )
+    gutted_steps: int = param.Integer(
+        0,
+        bounds=(0, None),
+        doc="Number of frames (< prediction_steps) to exclude from prediction",
+    )
     negative_samples: int = param.Integer(
         128, bounds=(1, None), doc="Number of negative samples to estimate with"
     )
@@ -471,6 +476,10 @@ class LightningPretrainedFrontend(pl.LightningModule):
             if params.training.cpc_loss is None:
                 raise ValueError("params.training.cpc_loss not initialized")
             self._num_speakers = params.training.cpc_loss.num_speakers
+            penc_out_size = (
+                params.training.cpc_loss.prediction_steps
+                - params.training.cpc_loss.gutted_steps
+            ) * self.latent.output_size
             if self._num_speakers is not None:
                 self._speaker_regex = re.compile(params.training.cpc_loss.speaker_regex)
                 if self._speaker_regex.groups != 1:
@@ -481,21 +490,21 @@ class LightningPretrainedFrontend(pl.LightningModule):
             if params.training.cpc_loss.prediction_type == "csa":
                 penc = CausalSelfAttentionEncoder(
                     self.context.output_size,
-                    params.training.cpc_loss.prediction_steps * self.latent.output_size,
+                    penc_out_size,
                     dropout_prob=params.training.dropout_prob,
                     # pos_period=10_000,
                 )
             elif params.training.cpc_loss.prediction_type == "recur":
                 penc = RecurrentEncoder(
                     self.context.output_size,
-                    params.training.cpc_loss.prediction_steps * self.latent.output_size,
+                    penc_out_size,
                     recurrent_type="lstm",
                     dropout_prob=params.training.dropout_prob,
                 )
             else:
                 penc = FeedForwardEncoder(
                     self.context.output_size,
-                    params.training.cpc_loss.prediction_steps * self.latent.output_size,
+                    penc_out_size,
                     "none",
                     False,
                     params.training.dropout_prob,
@@ -509,6 +518,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
                 self._num_speakers,
                 params.training.dropout_prob,
                 params.training.cpc_loss.offset,
+                params.training.cpc_loss.gutted_steps,
             )
         elif params.training.loss_type == "best-rq":
             self.register_module("cpc_loss", None)

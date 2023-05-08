@@ -81,6 +81,12 @@ def check_in(name: str, val: str, choices: Collection[str]):
         raise ValueError(f"Expected {name} to be one of '{choices}'; got '{val}'")
 
 
+def check_less_than(name: str, val, other, equal=False):
+    lt = "less than or equal to" if equal else "less than"
+    if val > other or (val == other and not equal):
+        raise ValueError(f"Expected {name} to be {lt} {other}; got {val}")
+
+
 T = TypeVar("T")
 
 
@@ -777,12 +783,13 @@ class EncoderSequence(Encoder, json_name="seq"):
 
 
 class CPCLossNetwork(torch.nn.Module, Generic[E]):
-    __slots__ = "negative_samples", "prediction_steps", "offset"
+    __slots__ = "negative_samples", "prediction_steps", "offset", "gutted_steps"
 
     negative_samples: int
     prediction_steps: int
     prediction_encoder: E
     offset: int
+    gutted_steps: int
 
     @overload
     def __init__(
@@ -795,6 +802,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         num_speakers: Optional[int] = None,
         dropout_prob: float = 0.0,
         offset: int = 0,
+        gutted_steps: int = 0,
     ):
         ...
 
@@ -809,6 +817,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         num_speakers: Optional[int] = None,
         dropout_prob: float = 0.0,
         offset: int = 0,
+        gutted_steps: int = 0,
     ):
         ...
 
@@ -822,6 +831,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         num_speakers: Optional[int] = None,
         dropout_prob: float = 0.0,
         offset: int = 0,
+        gutted_steps: int = 0,
     ) -> None:
         check_positive("latent_size", latent_size)
         if context_size is None:
@@ -834,10 +844,12 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         check_positive("offset", offset, True)
         if num_speakers is not None:
             check_positive("num_speakers", num_speakers)
+        check_less_than("gutted_steps", gutted_steps, prediction_steps)
+        included_steps = prediction_steps - gutted_steps
         if prediction_encoder is None:
             prediction_encoder = FeedForwardEncoder(
                 context_size,
-                prediction_steps * latent_size,
+                included_steps * latent_size,
                 "none",
                 False,
                 dropout_prob=dropout_prob,
@@ -852,12 +864,13 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
             check_equals(
                 "prediction_encoder.output_size",
                 prediction_encoder.output_size,
-                prediction_steps * latent_size,
+                included_steps * latent_size,
             )
 
         super().__init__()
         self.negative_samples = negative_samples
         self.prediction_steps = prediction_steps
+        self.gutted_steps = gutted_steps
         self.offset = offset
 
         if num_speakers is not None:
@@ -867,7 +880,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
 
         self.prediction_encoder = prediction_encoder
 
-        self.unfold = torch.nn.Unfold((prediction_steps, latent_size))
+        self.unfold = torch.nn.Unfold((included_steps, latent_size))
 
     def forward(
         self,
@@ -882,36 +895,39 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         N, T, C = latent.shape
         assert N > 0 and T > 0, (N, T)
         assert context.shape[:2] == (N, T)
-        K, M = self.prediction_steps, self.negative_samples
-        Tp = T - K - self.offset
+        K, M, G = self.prediction_steps, self.negative_samples, self.gutted_steps
+        O, Kp = self.offset, K - G
+        Tp = T - K - O
         assert Tp > 0, "prediction window too large for sequences"
-        latent = latent[:, self.offset :]
+        latent = latent[:, O:]
 
         if self.embed is not None:
             assert sources is not None, "sources needed for embedding"
             context = context + self.embed(sources).unsqueeze(1)
 
         lens_ = None if lens is None else lens.clamp_max(T - K)
-        Az = self.prediction_encoder(context[:, : T - K], lens_)[0]  # (N, T - K, K * C)
-        Az = Az[:, self.offset :].reshape(N * Tp * K, C, 1)
+        Az = self.prediction_encoder(context[:, : T - K], lens_)[0]  # (N, T - K, Kp* C)
+        Az = Az[:, O:].reshape(N * Tp * Kp, C, 1)
 
         if lens is None:
             phi_n = latent.flatten(end_dim=1)
             norm = latent.new_ones(1)
         else:
-            norm = (lens - K - self.offset).clamp_min_(0).sum() * K
+            norm = (lens - K - O).clamp_min_(0).sum() * Kp
             assert norm > 0, "prediction window too large"
-            mask = get_length_mask(latent, lens - self.offset, seq_dim=1)
+            mask = get_length_mask(latent, lens - O, seq_dim=1)
             phi_n = latent[mask].view(-1, latent.size(2))
         samps = torch.randint(phi_n.size(0), (N * Tp * M,), device=latent.device)
-        phi_n = phi_n[samps].view(N * Tp, 1, M, C).expand(N * Tp, K, M, C).flatten(0, 1)
+        phi_n = (
+            phi_n[samps].view(N * Tp, 1, M, C).expand(N * Tp, Kp, M, C).flatten(0, 1)
+        )
         denom = torch.bmm(phi_n, Az).squeeze(2)
-        denom = denom.logsumexp(1).view(N, Tp, K)
+        denom = denom.logsumexp(1).view(N, Tp, Kp)
         del phi_n
 
-        phi_k = self.unfold(latent[:, 1:].unsqueeze(1))  # (N, K * C, Tp)
-        phi_k = phi_k.transpose(1, 2).reshape(N * Tp * K, 1, C)
-        num = torch.bmm(phi_k, Az).view(N, Tp, K)
+        phi_k = self.unfold(latent[:, 1 + G :].unsqueeze(1))  # (N, Kp, Tp)
+        phi_k = phi_k.transpose(1, 2).reshape(N * Tp * Kp, 1, C)
+        num = torch.bmm(phi_k, Az).view(N, Tp, Kp)
         denom = num.logaddexp(denom)
         del phi_k
 
@@ -919,7 +935,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         if lens is None:
             loss = loss.mean()
         else:
-            mask = get_length_mask(loss, lens - K - self.offset, seq_dim=1)
+            mask = get_length_mask(loss, lens - K - O, seq_dim=1)
             loss = loss.masked_fill(~mask, 0.0).sum()
             loss = loss / norm
         return loss  # + math.log(M + 1)

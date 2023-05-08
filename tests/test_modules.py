@@ -81,7 +81,8 @@ def test_causal_self_attention_encoder_is_causal():
 )
 @pytest.mark.parametrize("penc", ["ff", "recur", "csa"])
 @pytest.mark.parametrize("offset", [0, 2])
-def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset):
+@pytest.mark.parametrize("gutted", [0, 1])
+def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset, gutted):
     torch.manual_seed(2)
     N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 100
     lens = torch.randint(K + 1, T + 1, (N,))
@@ -95,11 +96,13 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset):
     if penc == "ff":
         penc = None
     elif penc == "csa":
-        penc = CausalSelfAttentionEncoder(Cc, Cl * K, num_heads=1)
+        penc = CausalSelfAttentionEncoder(Cc, Cl * (K - gutted), num_heads=1)
     else:
-        penc = RecurrentEncoder(Cc, Cl * K)
+        penc = RecurrentEncoder(Cc, Cl * (K - gutted))
 
-    net = CPCLossNetwork(Cl, Cc, K, M, penc, N if embedding else None, 0, offset)
+    net = CPCLossNetwork(
+        Cl, Cc, K, M, penc, N if embedding else None, 0, offset, gutted
+    )
     net.eval()
 
     loss_exp, latents_ = 0.0, []
@@ -114,10 +117,10 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset):
             context_n = context_n + net.embed(speakers[n : n + 1])
         latent_samp_n = latent_samp[n]
         Az_n = net.prediction_encoder(context_n.unsqueeze(0))[0].squeeze(0)
-        assert Az_n.shape == (lens_n, Cl * K)
-        Az_n = Az_n.view(lens_n, K, Cl).transpose(0, 1)
-        for k in range(1, K + 1):
-            Az_n_k = Az_n[k - 1]  # (lens_n - 1, Cl)
+        assert Az_n.shape == (lens_n, Cl * (K - gutted))
+        Az_n = Az_n.view(lens_n, K - gutted, Cl).transpose(0, 1)
+        for k in range(1 + gutted, K + 1):
+            Az_n_k = Az_n[k - gutted - 1]  # (lens_n - 1, Cl)
             for t in range(lens_n - k - 1 - offset):
                 Az_n_k_t = Az_n_k[t + offset]  # (Cl,)
                 latent_n_tpk = latent_n[t + k + offset]  # (Cl,)
