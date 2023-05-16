@@ -1,0 +1,11 @@
+name: scpc-vis
+channels:
+  - conda-forge
+dependencies:
+  - pandas
+  - jupyter
+  - seaborn
+  - matplotlib
+  - statsmodels
+  - scipy
+  - fastcluster

@@ -1,7 +1,7 @@
 context: all
 cuda: false  # gpu usage seems wasted
 distance_mode: cosine
-feature_size: FEATURE_SIZE
+feature_size: ${fsize}
 max_size_group: 10
 max_x_across: 5
 quiet: false

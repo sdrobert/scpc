@@ -1,14 +1,44 @@
 # scpc
 
-See the [README](resources/README) for more details on the phone alignments
-and train/test split.
+Package and experiments for pre-training (mostly) CPC speech representations.
 
-## Installation
+## For inference
 
-If you're just interested in the package and its direct dependencies, try
+If you're just interested in producing speech representations from audio using
+a pre-trained model, install via
 
 ``` sh
 pip install git+https://github.com/sdrobert/scpc.git
+```
+
+Then, given a directory `in_dir` containing a bunch of `.wav` files, `.pt`
+files containing speech representations will be stored in `out_dir` with
+the command
+
+``` sh
+scpc-inference <feat-args> <ckpt> a2r in_dir out_dir
+```
+
+`<ckpt>` is the path to the pre-trained model, usually named `best.ckpt`.
+For models trained on raw speech, `<feat-args>` is just `--raw`. Otherwise it's
+necessary to pass at least a JSON file for configuring the feature frontend.
+The relevant arguments should be stored in a file called `feats.args.txt` in
+the same folder as `<ckpt>`.
+
+Information about the pre-trained model, including the number of parameters,
+downsampling factor, and so on, may be determined via the command
+
+``` sh
+scpc-inference <feat-args> <ckpt> info [<out-file>]
+```
+
+## For training
+
+Training involves a few more dependencies, which can be installed via the
+command
+
+``` sh
+pip install git+https://github.com/sdrobert/scpc.git[train]
 ```
 
 If you want to follow the recipe in [run.sh](run.sh), clone this repo, then
@@ -17,7 +47,7 @@ If you want to follow the recipe in [run.sh](run.sh), clone this repo, then
 git submodule update --init  # populates prep and s3prl
 conda env create -f environment.yaml
 conda activate scpc
-pip install .
+./run.sh
 ```
 
 Our compatibility layer for [s3prl](https://github.com/s3prl/s3prl) does not

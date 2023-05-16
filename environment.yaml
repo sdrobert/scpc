@@ -3,32 +3,48 @@ channels:
   - pytorch
   - nvidia
   - conda-forge
-  - coml
   - sdrobert
+  - nodefaults
 dependencies:
+  - editdistance
+  - fastcluster
+  - filelock
   - ipython
   - jiwer
+  - jupyter
+  - matplotlib
   - nltk 3.5
+  - numpy >=1.21
+  - omegaconf >=2.1.1
+  - pandas
   - pip
   - pydrobert-kaldi
   - pydrobert-param >=0.4.0
-  - pydrobert-speech
   - pysoundfile
   - pytest
   - python
   - pytorch-lightning >=1.7<2.0
   - pytorch::pytorch 1.13.1
   - pytorch::pytorch-cuda 11.6
+  - pyyaml >=5.4.1
   - requests
   - ruamel.yaml
+  - scikit-learn
+  - scipy
+  - seaborn
   - sentencepiece
   - setuptools
+  - setuptools 59.5.0
   - setuptools_scm
-  - tensorboard
+  - statsmodels
+  - tensorboardx
   - torchaudio 0.13.1
+  - tqdm >=4.56.0
+  - transformers
   - virtual-dataset
   - zerospeech-benchmarks
   - zerospeech-libriabx2
   - zerospeech-tde
-  - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch releases >0.3.0
+  - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch and pydrobert-speech release >0.3.0
     - "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc"
+    - "git+https://github.com/sdrobert/pydrobert-speech"

@@ -4,17 +4,17 @@ input_size: 80
 feat_type: fbank-80
 latent_type: ff
 recur:
-  num_layers: 2
+  num_layers: 4
   recurrent_type: lstm
 training:
-  num_devices: 4
+  num_devices: 2
   data:
     common:
-      batch_size: 3
+      batch_size: 6
       drop_last: true
   loss_type: best-rq
   best_rq_loss:
     prediction_type: sa
   chunking:
     lobe_size: 127
-    max_chunks: 16
+    max_chunks: 32

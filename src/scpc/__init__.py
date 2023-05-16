@@ -23,6 +23,7 @@ except ImportError:
     __version__ = "inplace"
 
 __all__ = [
+    "expert",
     "models",
     "modules",
 ]

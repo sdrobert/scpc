@@ -46,10 +46,6 @@ if [ ! -d "s3prl" ]; then
     exit 1
 fi
 
-if ! pip freeze | grep 's3prl' --quiet; then
-    pip install -e ./s3prl
-fi
-
 if [ -z "$libri" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.complete" ]; then

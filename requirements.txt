@@ -1,0 +1,2 @@
+pydrobert-speech
+torch>=1.10

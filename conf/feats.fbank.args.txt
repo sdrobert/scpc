@@ -1,0 +1,1 @@
+--computer-json conf/feats/fbank-41-feats.json
