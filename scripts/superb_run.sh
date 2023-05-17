@@ -16,13 +16,22 @@
 
 set -e
 
+if [ ! -d "s3prl" ]; then
+    echo "'s3prl' is not a directory. Did you call
+
+    git submodule update --init"
+
+    exit 1
+fi
+
+if ! pip freeze | grep 's3prl' --quiet; then
+    pip install -e './s3prl'
+fi
+
 # command-line option parsing
 help_message="Evaluate pre-trained model on SUPERB phone rec task"
 source scripts/preamble.sh
 
-ft="${MDL2FT[$model]}"
-
-em="$exp/$model/version_$ver"
 dl="$data/librispeech"
 sp="$em/superb/pr"
 
@@ -38,24 +47,12 @@ else
     mdl_flags=( "-k" "$mdl" )
 fi
 
-if [ ! -d "s3prl" ]; then
-    echo "'s3prl' is not a directory. Did you call
-
-    git submodule update --init"
-
-    exit 1
-fi
-
 if [ -z "$libri" ]; then
     libri="$dl/local/data"
-    if [ ! -f "$libri/.complete" ]; then
+    if [ ! -f "$libri/.100_complete" ]; then
         echo "Downloading librispeech"
-        $cmd_p python prep/librispeech.py "$dl" download \
-            --files \
-                {test,dev}-{clean,other}.tar.gz \
-                train-clean-100.tar.gz \
-                librispeech-vocab.txt
-        touch "$libri/.complete"
+        $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[$tr]}
+        touch "$libri/.100_complete"
         ((only)) && exit 0
     fi
 fi
@@ -64,12 +61,13 @@ if [ ! -f "$sp/config.yaml" ]; then
     mkdir -p "$sp"
     {
         export libri nwork
-        cat "conf/superb-pr.yaml" | envsubst
+        cat "conf/superb.pr.config.template.yaml" | envsubst
     } > "$sp/config.yaml"
     ((only)) && exit 0
 fi
 
 if [ ! -f "$sp/.train_complete" ]; then
+    set -x
     $cmd python s3prl/s3prl/run_downstream.py ${FT2SUPERB_ARGS[$ft]} \
         -p "$sp" \
         -c "$sp/config.yaml" \

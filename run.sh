@@ -22,10 +22,11 @@ if [ ! -d "prep" ]; then
     git submodule update --init"
 
     exit 1
-fi 
+fi
 
+# We likely don't need everything, but just in case
 if ! pip freeze | grep 'scpc' --quiet; then
-    pip install -e .
+    pip install -e '.[all]'
 fi
 
 # command-line option parsing
@@ -39,8 +40,7 @@ if [ -z "$libri" ] &&  [ ! -f "$dl/.${tr}_complete" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.${tr}_complete" ]; then
         echo "Downloading librispeech"
-        $cmd_p python prep/librispeech.py "$dl" download \
-            ${TR2DL_ARGS[$tr]}
+        $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[$tr]}
         touch "$libri/.${tr}_complete"
         ((only)) && exit 0
     fi
@@ -142,8 +142,7 @@ fi
 
 if [ ! -f "$em/best.ckpt" ]; then
     echo "Training $model model"
-    $cmd scpc \
-        fit \
+    $cmd scpc-train \
             --read-model-yaml "$em/model.yaml" \
             "$dlf/${TR2TDIR[$tr]}_train_subset" \
             "$dlf/${TR2TDIR[$tr]}_test_subset" \

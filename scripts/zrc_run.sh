@@ -14,7 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+
+if ! pip freeze | grep 'scpc' --quiet; then
+    pip install -e '.[zrc]'
+fi
 
 # command-line option parsing
 source scripts/preamble.sh
@@ -28,6 +31,7 @@ else
   zs="$em/zrc/librispeech/pca_$pca"
 fi
 
+
 ckpt="$em/best.ckpt"
 if [ ! -f "$ckpt" ]; then
     echo "'$ckpt' is not a file (did you finish ./run.sh?)"
@@ -37,6 +41,8 @@ fi
 # for zerospeech-benchmarks pkg
 export APP_DIR="$dz/local/data"
 export TEMP_DIR="$TMPDIR"
+
+set -e
 
 if [ ! -f "$dz/.complete" ]; then
     echo "Downloading zerospeech abxLS"

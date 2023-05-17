@@ -1,10 +1,8 @@
 {
   "files.watcherExclude": {
-    "**/data": true,
-    "**/exp": true,
-    "data/": true,
-    "exp/": true,
     ".micromamba/": true,
+    "**/data/**": true,
+    "**/exp/**": true
   },
   "search.exclude": {
     "**/data": true,

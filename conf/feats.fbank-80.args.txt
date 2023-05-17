@@ -1,1 +1,2 @@
---computer-json conf/fbank-80-feats.json
+--computer-json
+conf/fbank-80-feats.json

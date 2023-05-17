@@ -28,8 +28,7 @@ Options
  -$WRK_FLG      Number of workers per process
  -$LIB_FLG      Directory of where librispeech has been downloaded
             (default: downloads into $data/librispeech/local/data)
- -$XTR_FLG      Extra args to pass to trainer in fit stage
-            (./run.sh only)
+ -$XTR_FLG      Extra args to pass to trainer (./run.sh only)
  -$PCA_FLG      Number of dimensions to reduce output to.
             (default: no dim reduction; ./scripts/zrc_run.sh only)
 EOF
@@ -189,10 +188,10 @@ if [ ! -f "$em/model.yaml" ]; then
     # with the modified ones. The latter ensures the model always trains with
     # a specific configuration, even if the defaults are changed later.
     echo "Checking configuration conf/model.$model.yaml parses"
-    $cmd_p scpc fit --read-model-yaml "conf/model.$model.yaml" -h > /dev/null
+    $cmd_p scpc-train --read-model-yaml "conf/model.$model.yaml" -h > /dev/null
     echo "Writing $model configuration to '$cfg'"
     mkdir -p "$em"
-    $cmd_p scpc fit --print-model-yaml | \
+    $cmd_p scpc-train --print-model-yaml | \
         combine-yaml-files --quiet --nested \
             - "conf/model.$model.yaml" "$cfg"
     ((only)) && exit 0
@@ -211,7 +210,7 @@ if [ -z "${TR2DESC[$tr]}" ]; then
 fi
 train_description="${TR2DESC[$tr]}"
 
-system_description="$(awk -v s="$DEFT_SYS" '$1 == "system_description:" {ft=$2} END {print ft}' "$cfg")"
+system_description="$(awk -v s="$DEFT_SYS" '$1 == "system_description:" {$1=""; print}' "$cfg")"
 
 echo "system description: $system_description ($model)"
 echo "training set: $train_description ($tr)"

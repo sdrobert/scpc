@@ -139,6 +139,8 @@ class UpstreamExpert(torch.nn.Module):
             if options is not None:
                 raise ValueError("Cannot specify both model_config and options")
             options = get_feature_extractor_parser().parse_args(["@" + model_config])
+        elif options is None:
+            raise ValueError("Either options or model_config must be specified")
         self.feat_extractor, self._feds_rate = get_feature_extractor_from_opts(options)
         self.name = "[scpc]"
         self.encoder = Encoder.from_checkpoint(ckpt, "cpu")

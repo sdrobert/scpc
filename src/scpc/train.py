@@ -16,8 +16,10 @@ import argparse
 import itertools
 import logging
 import re
+import sys
+import os
 
-from typing import Dict, Iterator, Literal, Optional, Tuple
+from typing import Dict, Iterator, Literal, Optional, Tuple, Sequence
 
 import torch
 import param
@@ -25,23 +27,12 @@ import numpy as np
 import pytorch_lightning as pl
 import pydrobert.param.argparse as pargparse
 
-from pydrobert.torch.lightning import LitSpectDataModuleParams
+from pydrobert.torch.lightning import LitSpectDataModuleParams, LitSpectDataModule
 from pydrobert.torch.modules import ChunkBySlices, SliceSpectData
+from pytorch_lightning.callbacks import ModelCheckpoint, RichProgressBar
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from .modules import *
-
-__all__ = [
-    "CausalSelfAttentionEncoderParams",
-    "ChunkingParams",
-    "ConvEncoderParams",
-    "CPCLossParams",
-    "FeedForwardEncoderParams",
-    "LightningPretrainedFrontend",
-    "LightningPretrainedFrontendParams",
-    "RecurrentEncoderParams",
-    "SelfAttentionEncoderParams",
-    "TrainingParams",
-]
 
 
 class ConvEncoderParams(param.Parameterized):
@@ -774,3 +765,123 @@ class LightningPretrainedFrontend(pl.LightningModule):
         params = namespace.params
         params.initialize_missing()
         return cls(params, **kwargs)
+
+
+def main(args: Optional[Sequence[str]] = None):
+    """Pre-train an scpc model"""
+    parser = argparse.ArgumentParser(
+        description=main.__doc__, fromfile_prefix_chars="@"
+    )
+    parser.add_argument("train_dir")
+    parser.add_argument("val_dir")
+    parser.add_argument(
+        "best",
+        nargs="?",
+        default=None,
+        help="Where to save best inference model chekpoint to. Defaults to "
+        "'<root_dir>/<model_name>/version_<version>/best.ckpt' if --version is "
+        "specified, otherwise '<root_dir>/<model_name>/best.ckpt'",
+    )
+    parser.add_argument(
+        "--version",
+        type=int,
+        default=None,
+        help="What version/run of this model to perform/continue",
+    )
+    LightningPretrainedFrontend.add_argparse_args(
+        parser,
+        read_format_str="--read-model-{file_format}",
+        print_format_str="--print-model-{file_format}",
+    )
+    parser.add_argument(
+        "--num-workers", type=int, default=None, help="Number of workers in datasets"
+    )
+    parser.add_argument(
+        "--no-progress-bar",
+        action="store_true",
+        default=False,
+        help="Suppress progress bar",
+    )
+    parser.add_argument(
+        "--root-dir",
+        default=None,
+        help="The root experiment directory. Defaults to current working directory",
+    )
+
+    options = parser.parse_args(args)
+
+    lpf = LightningPretrainedFrontend.from_argparse_args(options)
+    tparams = lpf.params.training
+    dparams = tparams.data
+    assert dparams is not None
+    if dparams.train_dir is not None:
+        logging.getLogger("pytorch_lightning").warn(
+            "params.training.data.train_dir has been specified. Overwriting with "
+            "command line argument"
+        )
+    if dparams.val_dir is not None:
+        logging.getLogger("pytorch_lightning").warn(
+            "params.training.data.val_dir has been specified. Overwriting with "
+            "command line argument"
+        )
+    dparams.train_dir = options.train_dir
+    dparams.val_dir = options.val_dir
+    data = LitSpectDataModule(
+        dparams,
+        batch_first=True,
+        sort_batch=False,
+        suppress_alis=False,
+        tokens_only=False,
+        suppress_uttids=False,
+        shuffle=tparams.shuffle,
+        num_workers=options.num_workers,
+        warn_on_missing=False,
+        on_uneven_distributed="raise",
+    )
+    root_dir = options.root_dir
+    if root_dir is None:
+        root_dir = os.getcwd()
+    model_name = lpf.params.name
+    if model_name == "model_params":
+        logging.getLogger("pytorch_lightning").warn(
+            "saving with default model name 'model_name'. Use a non-default "
+            "name to avoid clobbering with different configurations"
+        )
+    model_dir = os.path.join(root_dir, model_name)
+    if options.version is not None:
+        model_dir = os.path.join(model_dir, f"version_{options.version}")
+    os.makedirs(model_dir, exist_ok=True)
+    cc = ModelCheckpoint(model_dir, save_last=True)
+    callbacks = [cc]
+    enable_progress_bar = not options.no_progress_bar
+    if enable_progress_bar:
+        callbacks.append(RichProgressBar())
+    logger_dir = os.path.join(root_dir, "tb_logs")
+    os.makedirs(logger_dir, exist_ok=True)
+    logger = TensorBoardLogger(logger_dir, model_name, options.version)
+    trainer = pl.Trainer(
+        logger=logger,
+        callbacks=callbacks,
+        default_root_dir=root_dir,
+        replace_sampler_ddp=False,
+        accelerator=tparams.accelerator,
+        strategy="ddp" if tparams.num_devices else None,
+        devices=tparams.num_devices if tparams.num_devices else 1,
+        num_nodes=tparams.num_nodes,
+        max_epochs=tparams.max_epochs,
+        enable_progress_bar=enable_progress_bar,
+    )
+    trainer.fit(lpf, data, ckpt_path="last")
+    # require training to have finished before saving
+    if not trainer.interrupted:
+        lpf = LightningPretrainedFrontend.load_from_checkpoint(
+            cc.best_model_path, params=lpf.params
+        )
+        ckpt_path = options.best
+        if ckpt_path is None:
+            ckpt_path = os.path.join(model_dir, "best.ckpt")
+        lpf.get_inference_model().save_checkpoint(ckpt_path)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

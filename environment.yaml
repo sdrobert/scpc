@@ -3,6 +3,7 @@ channels:
   - pytorch
   - nvidia
   - conda-forge
+  - coml
   - sdrobert
   - nodefaults
 dependencies:

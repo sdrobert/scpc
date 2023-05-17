@@ -24,6 +24,6 @@ except ImportError:
 
 __all__ = [
     "expert",
-    "models",
     "modules",
+    "train",
 ]
