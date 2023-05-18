@@ -35,6 +35,7 @@ source scripts/preamble.sh
 dl="$data/librispeech"
 dlf="$data/librispeech/$ft"
 em="$exp/$model/version_$ver"
+ckpt="$em/best.ckpt"
 
 if [ -z "$libri" ] &&  [ ! -f "$dl/.${tr}_complete" ]; then
     libri="$dl/local/data"
@@ -140,7 +141,7 @@ if [ $tr = 100 ]; then
     done
 fi
 
-if [ ! -f "$em/best.ckpt" ]; then
+if [ ! -f "$ckpt" ]; then
     echo "Training $model model"
     $cmd scpc-train \
             --read-model-yaml "$em/model.yaml" \
@@ -148,11 +149,22 @@ if [ ! -f "$em/best.ckpt" ]; then
             "$dlf/${TR2TDIR[$tr]}_test_subset" \
             --root-dir "$exp" \
             "--version=$ver" "--num-workers=$nwork" $xtra_args
-    [ -f "$em/best.ckpt" ] || exit 1
+    [ -f "$ckpt" ] || exit 1
     echo "Deleting intermediate checkpoints of $model"
     find "$em/" -name '*.ckpt' -not -name 'best.ckpt' -delete
     ((only)) && exit 0
 fi
+
+for pca in "${!PCAS[@]}"; do
+    pcaf="$em/pca_$pca.pt"
+    if [ ! -f "$pcaf" ]; then
+        echo "PCA of dim $pca being performed for $model"
+        $cmd_p scpc-pca \
+            --read-yaml conf/pca.yaml --device cuda --num-workers=$nwork \
+            "$dlf/${TR2TDIR[$tr]}_test_subset" "$ckpt" $pca "$pcaf"
+        ((only)) && exit 0
+    fi
+done
 
 # # check the average number of 10ms frames in an utterance
 # unzip -cq resources/converted_aligned_phones.zip | \

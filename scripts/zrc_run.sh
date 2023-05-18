@@ -19,12 +19,12 @@ if ! pip freeze | grep 'scpc' --quiet; then
     pip install -e '.[zrc]'
 fi
 
+set -e
+
 # command-line option parsing
 source scripts/preamble.sh
 
 dz="$data/zerospeech"
-em="$exp/$model/version_$ver"
-pdl="$em/predict/librispeech/full"
 if [ -z "$pca" ]; then
   zs="$em/zrc/librispeech/full"
 else
@@ -51,25 +51,13 @@ if [ ! -f "$dz/.complete" ]; then
     ((only)) && exit 0
 fi
 
-# for x in dev_clean dev_other test_clean test_other; do
-#     if [ ! -f "$pdl/$x/.complete" ]; then
-#         echo "Computing predictions for $x parition using $model model"
-#         mkdir -p "$pdl/$x"
-#         $cmd_p scpc \
-#             predict --numpy \
-#             "$em/best.ckpt" "$dlf/$x" "$pdl/$x"
-#         touch "$pdl/$x/.complete"
-#         ((only)) && exit 0
-#     fi
-# done
-
 if [ ! -f "$zs/meta.yaml" ]; then
     echo "Constructing abxLS zerospeech submission using $model model"
     rm -rf "$zs"
     zrc submission:init abxLS "$zs"
     rm "$zs/meta.yaml"
     (
-        export fsize="$(./scripts/inference.sh ${FT2TD_ARGS[$ft]} "$ckpt" info | awk '$1 == "downsampling_factor" {print $2 / 16000}')"
+        export fsize="$(scpc-info $expert_args "$ckpt" | awk '$1 == "downsampling_factor" {print $2 / 16000}')"
         cat conf/zrc.params.template.yaml | envsubst > "$zs/params.yaml"
     )
     (
@@ -80,8 +68,9 @@ if [ ! -f "$zs/meta.yaml" ]; then
 fi
 
 if [ ! -f "$zs/.a2r_complete" ]; then
-    $cmd_p ./scripts/inference.sh ${FT2TD_ARGS[$ft]} "$ckpt" \
-        a2r "$APP_DIR/datasets/abxLS-dataset" "$zs" --numpy
+    echo "Computing abxLS speech representations using $model model"
+    $cmd_p scpc-a2r $expert_args \
+        "$APP_DIR/datasets/abxLS-dataset" "$ckpt" "$zs" --numpy
     touch "$zs/.a2r_complete"
     ((only)) && exit 0
 fi

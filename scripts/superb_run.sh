@@ -33,25 +33,30 @@ help_message="Evaluate pre-trained model on SUPERB phone rec task"
 source scripts/preamble.sh
 
 dl="$data/librispeech"
-sp="$em/superb/pr"
-
-if [[ "$ft" =~ ^superb ]]; then
-    mdl_flags=( )
+if [ -z "$pca" ]; then
+  sp="$em/superb/pr/full"
 else
-    mdl="$em/best.ckpt"
-    if [ ! -f "$mdl" ]; then
-        echo "Model file '$mdl' doesn't exist. Did you set -$MDL_FLG," \
+  sp="$em/superb/pr/pca_$pca"
+fi
+
+
+if [[ "$ft" =~ ^superb. ]]; then
+    superb_flags=( "-u" "${ft:7}" )
+else
+    ckpt="$em/best.ckpt"
+    if [ ! -f "$ckpt" ]; then
+        echo "Model file '$ckpt' doesn't exist. Did you set -$MDL_FLG," \
             "-$VER_FLG correctly?"
         exit 1
     fi
-    mdl_flags=( "-k" "$mdl" )
+    superb_flags=( "-u" "scpc_local" "-k" "$ckpt" "-g" "$expert_config" )
 fi
 
 if [ -z "$libri" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.100_complete" ]; then
         echo "Downloading librispeech"
-        $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[$tr]}
+        $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[100]}
         touch "$libri/.100_complete"
         ((only)) && exit 0
     fi
@@ -68,10 +73,10 @@ fi
 
 if [ ! -f "$sp/.train_complete" ]; then
     set -x
-    $cmd python s3prl/s3prl/run_downstream.py ${FT2SUPERB_ARGS[$ft]} \
+    $cmd python s3prl/s3prl/run_downstream.py \
         -p "$sp" \
         -c "$sp/config.yaml" \
-        "${mdl_flags[@]}" \
+        "${superb_flags[@]}" \
         -m train \
         -d ctc \
         -a

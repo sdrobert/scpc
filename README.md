@@ -16,7 +16,7 @@ files containing speech representations will be stored in `out_dir` with
 the command
 
 ``` sh
-scpc-inference <feat-args> <ckpt> a2r in_dir out_dir
+scpc-a2r <feat-args> in_dir <ckpt> out_dir
 ```
 
 `<ckpt>` is the path to the pre-trained model, usually named `best.ckpt`.
@@ -29,7 +29,7 @@ Information about the pre-trained model, including the number of parameters,
 downsampling factor, and so on, may be determined via the command
 
 ``` sh
-scpc-inference <feat-args> <ckpt> info [<out-file>]
+scpc-info <feat-args> <ckpt> [<out-file>]
 ```
 
 ## For training
@@ -41,7 +41,7 @@ command
 pip install git+https://github.com/sdrobert/scpc.git[train]
 ```
 
-If you want to follow the recipe in [run.sh](run.sh), clone this repo, then
+If you want to follow the recipe in [run.sh](./run.sh), clone this repo, then
 
 ``` sh
 git submodule update --init  # populates prep and s3prl

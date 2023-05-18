@@ -8,7 +8,8 @@ usage () {
     local ret="${1:-1}"
     IFS="," echo -e "Usage: $0 [-${HLP_FLG}|-${OLY_FLG}|-${SRN_FLG}] [-$DAT_FLG DIR]" \
         "[-$EXP_FLG DIR] [-$VER_FLG I] [-$PRC_FLG N]"\
-        "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS] [-$PCA_FLG N]"\
+        "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"\
+        "[-$PCA_FLG {${!PCAS[*]}}]"\
         "[-$MDL_FLG {${!MDLS[*]}}]"
     if ((ret == 0)); then
         cat << EOF 1>&2
@@ -30,7 +31,7 @@ Options
             (default: downloads into $data/librispeech/local/data)
  -$XTR_FLG      Extra args to pass to trainer (./run.sh only)
  -$PCA_FLG      Number of dimensions to reduce output to.
-            (default: no dim reduction; ./scripts/zrc_run.sh only)
+            (default: no dim reduction; ./scripts/{zrc,superb}_run.sh only)
 EOF
     fi
     exit "${1:-1}"
@@ -61,12 +62,6 @@ declare -A FT2PAD=(
     [raw]="399"
     [fbank]="0"
     [fbank-80]="0"
-)
-declare -A FT2SUPERB_ARGS=(
-    [raw]="-u scpc_local -g conf/feats.raw.args.txt"
-    [fbank]="-u scpc_local -g conf/feats.fbank.args.txt"
-    [fbank-80]="-u scpc_local -g conf/feats.fbank-80.args.txt"
-    [superb.fbank]="-u fbank"
 )
 
 DEFT_SYS="Unknown"
@@ -101,6 +96,8 @@ fi
 if [[ "$0" =~ "superb_run.sh" ]]; then
     MDLS["superb.fbank"]=x
 fi
+
+declare -A PCAS=( [8]=x [16]=x [32]=x [64]=x [128]=x )
 
 # variables
 data="data"
@@ -160,7 +157,7 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${
             xtra_args="$OPTARG"
             ;;
         ${PCA_FLG})
-            argcheck_is_nat $opt "$OPTARG"
+            argcheck_is_a_choice $opt "${!PCAS[@]}" "$OPTARG"
             pca="$OPTARG"
             ;;
         *)
@@ -173,8 +170,8 @@ if [[ "$0" =~ "_run.sh" ]] && [ ! -z "$xtra_args" ]; then
     echo "-$XTR_FLG '$xtra_args' set, but not in ./run.sh; ignoring"
 fi
 
-if [[ ! "$0" =~ "zrc_" ]] && [ ! -z "$pca" ]; then
-    echo "-$PCA_FLG $pca set, but not in ./scripts/zrc_run.sh; ignoring"
+if [[ ! "$0" =~ "_run.sh" ]] && [ ! -z "$pca" ]; then
+    echo "-$PCA_FLG $pca set, but in ./run.sh; ignoring"
 fi
 
 # the first step is always to write the config file to the experiment
@@ -215,6 +212,27 @@ system_description="$(awk -v s="$DEFT_SYS" '$1 == "system_description:" {$1=""; 
 echo "system description: $system_description ($model)"
 echo "training set: $train_description ($tr)"
 
-if [ ! -f "$em/feats.args.txt" ]; then
-    echo "${FT2TD_ARGS[$ft]}" > "$em/feats.args.txt"
+a="$(mktemp)"
+echo "${FT2TD_ARGS[$ft]}" | tr ' ' '\n' > "$a"
+if [ ! -f "$em/expert.args.full.txt" ]; then
+    cp "$a" "$em/expert.args.full.txt"
+else
+    d="$(diff "$a" "$em/expert.args.full.txt")"
+    if [ ! -z "$d" ]; then
+        echo "Expected and actual expert arguments differ!"
+        echo "$d"
+        exit 1
+    fi
 fi
+rm -f "$a"
+for x in "${!PCAS[@]}"; do
+    cat "$em/expert.args.full.txt" <(echo "--pca-file
+$em/pca_$x.pt") > "$em/expert.args.pca_$x.txt"
+done
+
+if [ -z "$pca" ]; then
+    expert_config="$em/expert.args.full.txt"
+else
+    expert_config="$em/expert.args.pca_$pca.txt"
+fi
+expert_args="$(cat "$expert_config")"

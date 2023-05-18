@@ -14,14 +14,16 @@
 
 import argparse
 import json
-import os
-import sys
-import glob
+import warnings
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
-import numpy as np
+
+__all__ = [
+    "get_feature_extractor_parser",
+    "UpstreamExpert",
+]
 
 
 try:
@@ -30,8 +32,6 @@ try:
     import pydrobert.speech.post as spost
     import pydrobert.speech.compute as scompute
     import pydrobert.speech.alias as salias
-    import pydrobert.speech.util as sutil
-    import pydrobert.speech.config as sconfig
 except ImportError:
     storch = spre = spost = scompute = salias = sutil = sconfig = None
 
@@ -66,6 +66,12 @@ def get_feature_extractor_parser() -> argparse.ArgumentParser:
         default=False,
         help="If specified, audio will not be processed",
     )
+    parser.add_argument(
+        "--pca-file",
+        default=None,
+        type=argparse.FileType("rb"),
+        help="Path to matrix for reducing dimensionality of representations",
+    )
     return parser
 
 
@@ -74,7 +80,7 @@ class RawComputer(torch.nn.Module):
         return x.unsqueeze(-1)
 
 
-def get_feature_extractor_from_opts(options) -> Tuple[torch.nn.Module, int]:
+def _get_feature_extractor_from_opts(options) -> Tuple[torch.nn.Module, int]:
     if options.raw:
         computer, rate = RawComputer(), 1
     else:
@@ -130,6 +136,7 @@ def get_feature_extractor_from_opts(options) -> Tuple[torch.nn.Module, int]:
 class UpstreamExpert(torch.nn.Module):
     encoder: Encoder
     feat_extractor: torch.nn.Module
+    pca: torch.nn.Module
 
     def __init__(
         self, ckpt: str, model_config: Optional[str] = None, options=None, **kwargs
@@ -141,9 +148,26 @@ class UpstreamExpert(torch.nn.Module):
             options = get_feature_extractor_parser().parse_args(["@" + model_config])
         elif options is None:
             raise ValueError("Either options or model_config must be specified")
-        self.feat_extractor, self._feds_rate = get_feature_extractor_from_opts(options)
+        self.feat_extractor, self._feds_rate = _get_feature_extractor_from_opts(options)
         self.name = "[scpc]"
         self.encoder = Encoder.from_checkpoint(ckpt, "cpu")
+        if self.encoder.input_size != 1 and options.raw:
+            raise ValueError(
+                "--raw specified but encoder expecting features of size "
+                f"{self.encoder.input_size}"
+            )
+        if options.pca_file is not None:
+            W = torch.load(options.pca_file)
+            if W.ndim != 2 or self.encoder.output_size != W.size(0):
+                raise ValueError(
+                    "Expected --pca-file to contain matrix of shape ("
+                    f"{self.encoder.output_size}, ...); got {W.shape}"
+                )
+            self.pca = torch.nn.Linear(W.size(0), W.size(1))
+            self.pca.weight.data.copy_(W.T)
+            del W
+        else:
+            self.pca = torch.nn.Identity()
 
     def get_downsample_rates(self, key: str) -> int:
         rate = self.encoder.downsampling_factor
@@ -158,121 +182,5 @@ class UpstreamExpert(torch.nn.Module):
         lens = torch.tensor([f.size(0) for f in feats]).to(wavs[0].device)
         x = torch.nn.utils.rnn.pad_sequence(feats, batch_first=True)
         x, lens = self.encoder(x, lens)
+        x = self.pca(x)
         return {"hidden_states": x}
-
-
-def _is_dir(val: str) -> str:
-    if not os.path.isdir(val):
-        raise ValueError(f"'{val}' is not a directory")
-    return val
-
-
-def main(args: Optional[Sequence[str]] = None):
-    parser = argparse.ArgumentParser(
-        description="Convert audio files to representation files",
-        parents=[get_feature_extractor_parser()],
-    )
-    parser.add_argument("ckpt", type=argparse.FileType("rb"))
-    subparsers = parser.add_subparsers(required=True, dest="cmd")
-
-    a2r_parser = subparsers.add_parser(
-        "a2r", description="Convert audio files to speech representations"
-    )
-    a2r_parser.add_argument("in_dir", type=_is_dir, help="Path containing wav files")
-    a2r_parser.add_argument("out_dir", help="Path to store speech reps to")
-    a2r_parser.add_argument(
-        "--numpy",
-        action="store_true",
-        default=False,
-        help="Whether to store as .npy files",
-    )
-    a2r_parser.add_argument(
-        "--audio-suffix", default=".wav", help="Suffix of audio files"
-    )
-    a2r_parser.add_argument(
-        "--force-as",
-        default=None,
-        choices={
-            "table",
-            "wav",
-            "hdf5",
-            "npy",
-            "npz",
-            "pt",
-            "sph",
-            "kaldi",
-            "file",
-            "soundfile",
-        }
-        | sconfig.SOUNDFILE_SUPPORTED_FILE_TYPES,
-        help="Force the paths in 'map' to be interpreted as a specific type "
-        "of data. table: kaldi table (key is utterance id); wav: wave file; "
-        "hdf5: HDF5 archive (key is utterance id); npy: Numpy binary; npz: "
-        "numpy archive (key is utterance id); pt: PyTorch binary; sph: NIST "
-        "SPHERE file; kaldi: kaldi object; file: numpy.fromfile binary. soundfile: "
-        "force soundfile processing.",
-    )
-    a2r_parser.add_argument(
-        "--channel",
-        type=int,
-        default=-1,
-        help="Channel to draw audio from. Default is to assume mono",
-    )
-
-    info_parser = subparsers.add_parser("info")
-    info_parser.add_argument(
-        "out", nargs="?", type=argparse.FileType("w"), default=sys.stdout
-    )
-
-    options = parser.parse_args(args)
-
-    expert = UpstreamExpert(options.ckpt, options=options)
-
-    if options.cmd == "info":
-        out = options.out
-        out.write(f"feat_size {expert.encoder.input_size}\n")
-        out.write(f"output_size {expert.encoder.output_size}\n")
-        out.write(f"downsampling_factor {expert.get_downsample_rates('')}\n")
-        out.write(
-            f"num_params {sum(np.prod(p.shape) for p in expert.encoder.parameters())}\n"
-        )
-    elif options.cmd == "a2r":
-        with torch.no_grad():
-            for inf in glob.iglob(
-                f"{glob.escape(options.in_dir)}/**/*{options.audio_suffix}"
-            ):
-                utt_id = os.path.basename(inf).rsplit(options.audio_suffix, 1)[0]
-                signal = sutil.read_signal(
-                    inf, dtype=np.float32, force_as=options.force_as
-                )
-                if options.channel == -1 and signal.ndim > 1 and signal.shape[0] > 1:
-                    raise ValueError(
-                        "Utterance {}: Channel is not specified but signal has "
-                        "shape {}".format(utt_id, signal.shape)
-                    )
-                elif (options.channel != -1 and signal.ndim == 1) or (
-                    options.channel >= signal.shape[0]
-                ):
-                    raise ValueError(
-                        "Utterance {}: Channel specified as {} but signal has "
-                        "shape {}".format(utt_id, options.channel, signal.shape)
-                    )
-                if signal.ndim != 1:
-                    signal = signal[options.channel]
-                signal = torch.from_numpy(signal)
-                odir = os.path.join(
-                    options.out_dir,
-                    os.path.relpath(os.path.dirname(inf), options.in_dir),
-                )
-                reps = expert([signal])["hidden_states"][0].cpu()
-                os.makedirs(odir, exist_ok=True)
-                if options.numpy:
-                    np.save(os.path.join(odir, utt_id + ".npy"), reps.double().numpy())
-                else:
-                    torch.save(reps, os.path.join(odir, utt_id + ".pt"))
-    else:
-        raise NotImplementedError
-
-
-if __name__ == "__main__":
-    sys.exit(main())
