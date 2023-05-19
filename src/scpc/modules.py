@@ -880,7 +880,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
 
         self.prediction_encoder = prediction_encoder
 
-        self.unfold = torch.nn.Unfold((included_steps, latent_size))
+        # self.unfold = torch.nn.Unfold((included_steps, latent_size))
 
     def forward(
         self,
@@ -889,6 +889,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         lens: Optional[torch.Tensor] = None,
         sources: Optional[torch.Tensor] = None,
     ):
+        latent = latent.contiguous()  # necessary for as_strided; might as well do here
         if context is None:
             context = latent
 
@@ -899,7 +900,6 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         O, Kp = self.offset, K - G
         Tp = T - K - O
         assert Tp > 0, "prediction window too large for sequences"
-        latent = latent[:, O:]
 
         if self.embed is not None:
             assert sources is not None, "sources needed for embedding"
@@ -910,13 +910,14 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         Az = Az[:, O:].reshape(N * Tp * Kp, C, 1)
 
         if lens is None:
-            phi_n = latent.flatten(end_dim=1)
+            phi_n = latent[:, O:].flatten(end_dim=1)
             norm = latent.new_ones(1)
         else:
             norm = (lens - K - O).clamp_min_(0).sum() * Kp
             assert norm > 0, "prediction window too large"
-            mask = get_length_mask(latent, lens - O, seq_dim=1)
-            phi_n = latent[mask].view(-1, latent.size(2))
+            mask = get_length_mask(latent, lens, seq_dim=1)
+            mask[:, :O] = False
+            phi_n = latent[mask].view(-1, C)
         samps = torch.randint(phi_n.size(0), (N * Tp * M,), device=latent.device)
         phi_n = (
             phi_n[samps].view(N * Tp, 1, M, C).expand(N * Tp, Kp, M, C).flatten(0, 1)
@@ -925,8 +926,10 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         denom = denom.logsumexp(1).view(N, Tp, Kp)
         del phi_n
 
-        phi_k = self.unfold(latent[:, 1 + G :].unsqueeze(1))  # (N, Kp, Tp)
-        phi_k = phi_k.transpose(1, 2).reshape(N * Tp * Kp, 1, C)
+        # phi_k = self.unfold(latent[:, 1 + G + O :].unsqueeze(1))  # (N, Kp, Tp)
+        # phi_k = phi_k.transpose(1, 2).reshape(N * Tp * Kp, 1, C)
+        phi_k = latent.as_strided((N, Tp, Kp, C), (T * C, C, C, 1), C * (1 + G + O))
+        phi_k = phi_k.reshape(N * Tp * Kp, 1, C)
         num = torch.bmm(phi_k, Az).view(N, Tp, Kp)
         denom = num.logaddexp(denom)
         del phi_k
