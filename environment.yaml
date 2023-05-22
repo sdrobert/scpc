@@ -24,7 +24,7 @@ dependencies:
   - pysoundfile
   - pytest
   - python
-  - pytorch-lightning >=1.7<2.0
+  - pytorch-lightning >=1.7, <2.0
   - pytorch::pytorch 1.13.1
   - pytorch::pytorch-cuda 11.6
   - pyyaml >=5.4.1
