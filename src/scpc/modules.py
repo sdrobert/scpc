@@ -926,7 +926,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         denom = denom.logsumexp(1).view(N, Tp, Kp)
         del phi_n
 
-        # phi_k = self.unfold(latent[:, 1 + G + O :].unsqueeze(1))  # (N, Kp, Tp)
+        # phi_k = self.unfold(latent[:, 1 + G + O :].unsqueeze(1))  # (N, Kp * C, Tp)
         # phi_k = phi_k.transpose(1, 2).reshape(N * Tp * Kp, 1, C)
         phi_k = latent.as_strided((N, Tp, Kp, C), (T * C, C, C, 1), C * (1 + G + O))
         phi_k = phi_k.reshape(N * Tp * Kp, 1, C)

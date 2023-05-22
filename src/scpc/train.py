@@ -638,15 +638,16 @@ class LightningPretrainedFrontend(pl.LightningModule):
             return speakers
         assert self._num_speakers is not None
         for n, utt_id in enumerate(utt_ids):
-            speaker = self._speaker_regex.match(utt_id).group(0)
+            speaker = self._speaker_regex.match(utt_id).group(1)
             id_ = self._speaker_map.get(speaker, None)
             if id_ is None:
                 self._speaker_min += 1
                 if self._speaker_min >= self._num_speakers:
                     logger = logging.getLogger("pytorch_lightning")
                     logger.warn(f"number of speakers exceeded {self._num_speakers}")
-                    self._speaker_min = self._num_speakers
+                    self._speaker_min = self._num_speakers - 1
                 id_ = self._speaker_min
+                self._speaker_map[speaker] = id_
             speakers[n] = id_
         return speakers
 
