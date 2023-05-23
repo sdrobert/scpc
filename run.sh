@@ -140,6 +140,7 @@ if [ $tr = 100 ]; then
             rm -rf "$dlf/train_clean_100_${x}_subset"
             $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
                 "$dlf/train_clean_100"{,_${x}_subset} \
+                --symlink \
                 --utt-list-file resources/train_clean_100_${x}_subset.txt
             touch "$dlf/train_clean_100_${x}_subset/.complete"
             ((only)) && exit 0

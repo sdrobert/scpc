@@ -238,6 +238,10 @@ class TrainingParams(param.Parameterized):
         ChunkingParams, instantiate=False, doc="Parameters for chunking"
     )
 
+    frame_average: int = param.Integer(
+        1, bounds=(1, None), doc="Number of frames to average in loss function"
+    )
+
     loss_type: Literal["cpc", "best-rq"] = param.ObjectSelector(
         "cpc", ["cpc", "best-rq"], doc="Loss to train model with"
     )
@@ -662,6 +666,19 @@ class LightningPretrainedFrontend(pl.LightningModule):
             feats_ = feats
         latent, lens = self.latent(feats_, feat_sizes)
         context, lens = self.context(latent, lens)
+        W = self.params.training.frame_average
+        if W > 1:
+            N, T, C = context.shape
+            Tp = T - T % W
+            if not Tp:
+                raise ValueError(f"frame_average {W} too large")
+            context = context[:, :Tp].reshape(N, Tp // W, W, C).mean(2)
+            N, T, C = latent.shape
+            Tp = T - T % W
+            assert Tp > 0  # should be <= context Tp
+            latent = latent[:, :Tp].reshape(N, Tp // W, W, C).mean(2)
+            if lens is not None:
+                lens = lens / W
         if self.params.training.loss_type == "cpc":
             loss = self.cpc_loss(latent, context, lens, speakers)
         elif self.params.training.loss_type == "best-rq":
