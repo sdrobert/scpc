@@ -28,6 +28,12 @@ if ! pip freeze | grep 's3prl' --quiet; then
     pip install -e './s3prl'
 fi
 
+if [ "$CONDA_DEFAULT_ENV" = "base" ]; then
+    echo '$CONDA_DEFAULT_ENV set to base. This is probably undesired. If you'
+    echo "really want this, modify $0 to exclude the check"
+    exit 1
+fi
+
 # command-line option parsing
 help_message="Evaluate pre-trained model on SUPERB phone rec task"
 source scripts/preamble.sh

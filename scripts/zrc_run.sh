@@ -14,6 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+if [ "$CONDA_DEFAULT_ENV" = "base" ]; then
+    echo '$CONDA_DEFAULT_ENV set to base. This is probably undesired. If you'
+    echo "really want this, modify $0 to exclude the check"
+    exit 1
+fi
 
 if ! pip freeze | grep 'scpc' --quiet; then
     pip install -e '.[zrc]'

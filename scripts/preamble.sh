@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# common command-line option parser for run.sh and superb_run.sh
+# common command-line option parser for run scripts
 
 source scripts/utils.sh
 

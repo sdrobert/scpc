@@ -24,6 +24,12 @@ if [ ! -d "prep" ]; then
     exit 1
 fi
 
+if [ "$CONDA_DEFAULT_ENV" = "base" ]; then
+    echo '$CONDA_DEFAULT_ENV set to base. This is probably undesired. If you'
+    echo "really want this, modify $0 to exclude the check"
+    exit 1
+fi
+
 # We likely don't need everything, but just in case
 if ! pip freeze | grep 'scpc' --quiet; then
     pip install -e '.[all]'
@@ -91,7 +97,7 @@ if [ $tr = 100 ]; then
             }
         else
             align2frames() {
-                awk -v i=$i -v I=$nproc '(NR + i - 2) % I == 0 {print;}'
+                awk -v i=$i -v I=$nproc '(NR + i - 2) % I == 0 {printf "lbi-"; print;}'
             }
         fi
         for i in $(seq 1 $nproc); do
