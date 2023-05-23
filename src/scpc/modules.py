@@ -907,7 +907,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
 
         lens_ = None if lens is None else lens.clamp_max(T - K)
         Az = self.prediction_encoder(context[:, : T - K], lens_)[0]  # (N, T - K, Kp* C)
-        Az = Az[:, O:].reshape(N * Tp * Kp, C, 1)
+        Az = Az[:, O:].reshape(N * Tp, Kp, C)
 
         if lens is None:
             phi_n = latent[:, O:].flatten(end_dim=1)
@@ -919,18 +919,16 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
             mask[:, :O] = False
             phi_n = latent[mask].view(-1, C)
         samps = torch.randint(phi_n.size(0), (N * Tp * M,), device=latent.device)
-        phi_n = (
-            phi_n[samps].view(N * Tp, 1, M, C).expand(N * Tp, Kp, M, C).flatten(0, 1)
-        )
-        denom = torch.bmm(phi_n, Az).squeeze(2)
-        denom = denom.logsumexp(1).view(N, Tp, Kp)
+        phi_n = phi_n[samps].view(N * Tp, M, C).transpose(1, 2)
+        denom = torch.bmm(Az, phi_n)
+        denom = denom.logsumexp(2).view(N, Tp, Kp)
         del phi_n
 
         # phi_k = self.unfold(latent[:, 1 + G + O :].unsqueeze(1))  # (N, Kp * C, Tp)
         # phi_k = phi_k.transpose(1, 2).reshape(N * Tp * Kp, 1, C)
         phi_k = latent.as_strided((N, Tp, Kp, C), (T * C, C, C, 1), C * (1 + G + O))
         phi_k = phi_k.reshape(N * Tp * Kp, 1, C)
-        num = torch.bmm(phi_k, Az).view(N, Tp, Kp)
+        num = torch.bmm(phi_k, Az.view(N * Tp * Kp, C, 1)).view(N, Tp, Kp)
         denom = num.logaddexp(denom)
         del phi_k
 
