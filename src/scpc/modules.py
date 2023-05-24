@@ -228,11 +228,7 @@ E = TypeVar("E", bound="Encoder", covariant=True)
 
 
 class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
-    __slots__ = "input_size", "output_size"
-    __call__: Callable[
-        [torch.Tensor, Optional[torch.Tensor]],
-        Tuple[torch.Tensor, Optional[torch.Tensor]],
-    ]
+    __constants__ = "input_size", "output_size"
     input_size: int
     output_size: int
 
@@ -323,6 +319,21 @@ class Encoder(torch.nn.Module, metaclass=abc.ABCMeta):
         encoder = cls.from_json(json)
         encoder.load_state_dict(state_dict, strict)
         return encoder
+
+    @overload
+    def __call__(
+        self, x: torch.Tensor, lens: Literal[None] = None
+    ) -> Tuple[torch.Tensor, Literal[None]]:
+        ...
+
+    @overload
+    def __call__(
+        self, x: torch.Tensor, lens: torch.Tensor = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        ...
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        return super().__call__(*args, **kwds)
 
 
 class IdentityEncoder(Encoder, json_name="id"):
@@ -489,7 +500,7 @@ class ConvEncoder(Encoder, json_name="conv"):
 
 
 class SelfAttentionEncoder(Encoder, json_name="sa"):
-    __slots__ = "pos_period"
+    __constants__ = ("pos_period",)
     pos_period: Optional[int]
     pos_buf: Optional[torch.Tensor]
 
@@ -613,7 +624,7 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
 
 
 class CausalSelfAttentionEncoder(SelfAttentionEncoder, json_name="csa"):
-    __slots__ = "max_width"
+    __constants__ = ("max_width",)
     max_width: Optional[int]
 
     def __init__(
@@ -783,7 +794,7 @@ class EncoderSequence(Encoder, json_name="seq"):
 
 
 class CPCLossNetwork(torch.nn.Module, Generic[E]):
-    __slots__ = "negative_samples", "prediction_steps", "offset", "gutted_steps"
+    __constants__ = "negative_samples", "prediction_steps", "offset", "gutted_steps"
 
     negative_samples: int
     prediction_steps: int
