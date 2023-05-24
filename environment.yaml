@@ -38,6 +38,7 @@ dependencies:
   - setuptools 59.5.0
   - setuptools_scm
   - statsmodels
+  - tensorboard
   - tensorboardx
   - torchaudio 0.13.1
   - tqdm >=4.56.0
