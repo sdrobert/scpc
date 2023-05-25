@@ -794,13 +794,20 @@ class EncoderSequence(Encoder, json_name="seq"):
 
 
 class CPCLossNetwork(torch.nn.Module, Generic[E]):
-    __constants__ = "negative_samples", "prediction_steps", "offset", "gutted_steps"
+    __constants__ = (
+        "negative_samples",
+        "prediction_steps",
+        "offset",
+        "gutted_steps",
+        "averaging_penalty",
+    )
 
     negative_samples: int
     prediction_steps: int
     prediction_encoder: E
     offset: int
     gutted_steps: int
+    averaging_penalty: float
 
     @overload
     def __init__(
@@ -814,6 +821,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         dropout_prob: float = 0.0,
         offset: int = 0,
         gutted_steps: int = 0,
+        averaging_penalty: float = 0.0,
     ):
         ...
 
@@ -829,6 +837,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         dropout_prob: float = 0.0,
         offset: int = 0,
         gutted_steps: int = 0,
+        averaging_penalty: float = 0.0,
     ):
         ...
 
@@ -843,6 +852,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         dropout_prob: float = 0.0,
         offset: int = 0,
         gutted_steps: int = 0,
+        averaging_penalty: float = 0.0,
     ) -> None:
         check_positive("latent_size", latent_size)
         if context_size is None:
@@ -856,6 +866,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         if num_speakers is not None:
             check_positive("num_speakers", num_speakers)
         check_less_than("gutted_steps", gutted_steps, prediction_steps)
+        check_positive("averaging_penalty", averaging_penalty, True)
         included_steps = prediction_steps - gutted_steps
         if prediction_encoder is None:
             prediction_encoder = FeedForwardEncoder(
@@ -879,10 +890,13 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
             )
 
         super().__init__()
-        self.negative_samples = negative_samples
+        self.negative_samples, self.averaging_penalty = (
+            negative_samples,
+            averaging_penalty,
+        )
         self.prediction_steps = prediction_steps
-        self.gutted_steps = gutted_steps
-        self.offset = offset
+        self.averaging_penalty = averaging_penalty
+        self.gutted_steps, self.offset = gutted_steps, offset
 
         if num_speakers is not None:
             self.embed = torch.nn.Embedding(num_speakers, context_size)
@@ -938,23 +952,32 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         # phi_k = self.unfold(latent[:, 1 + G + O :].unsqueeze(1))  # (N, Kp * C, Tp)
         # phi_k = phi_k.transpose(1, 2).reshape(N * Tp * Kp, 1, C)
         phi_k = latent.as_strided((N, Tp, Kp, C), (T * C, C, C, 1), C * (1 + G + O))
-        phi_k = phi_k.reshape(N * Tp * Kp, 1, C)
-        num = torch.bmm(phi_k, Az.view(N * Tp * Kp, C, 1)).view(N, Tp, Kp)
+        num = torch.linalg.vecdot(phi_k, Az.view(N, Tp, Kp, C))  # (N, Tp, Kp)
         denom = num.logaddexp(denom)
         del phi_k
 
         loss = denom - num  # neg num - denom
+        if lens is not None:
+            mask_ = ~get_length_mask(loss, lens - K - O, seq_dim=1)
+        if self.averaging_penalty > 0.0:
+            if lens is None:
+                latent = latent[:, O:].mean(1)  # (N, C)
+            else:
+                mask = mask.transpose(1, 2).to(latent)
+                mask /= mask.sum(2, keepdim=True).clamp_min_(1.0)
+                latent = (latent.transpose(1, 2) * mask).sum(2)
+            inner = torch.bmm(Az.view(N, Tp * Kp, C), latent.unsqueeze(2)).view_as(loss)
+            loss = loss + (inner - 1).square() * self.averaging_penalty
         if lens is None:
             loss = loss.mean()
         else:
-            mask = get_length_mask(loss, lens - K - O, seq_dim=1)
-            loss = loss.masked_fill(~mask, 0.0).sum()
+            loss = loss.masked_fill(mask_, 0.0).sum()
             loss = loss / norm
         return loss  # + math.log(M + 1)
 
 
 class BestRqLossNetwork(torch.nn.Module, Generic[E]):
-    __slots__ = "offset"
+    __constants__ = ("offset",)
 
     prediction_encoder: E
     offset: int

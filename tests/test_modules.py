@@ -80,13 +80,20 @@ def test_causal_self_attention_encoder_is_causal():
     "embedding", [True, False], ids=["w/-embedding", "w/o-embedding"]
 )
 @pytest.mark.parametrize("penc", ["ff", "recur", "csa"])
-@pytest.mark.parametrize("offset", [0, 2])
-@pytest.mark.parametrize("gutted", [0, 1])
-def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset, gutted):
+@pytest.mark.parametrize("offset", [0, 2], ids=["o0", "o2"])
+@pytest.mark.parametrize("gutted", [0, 1], ids=["g0", "g1"])
+@pytest.mark.parametrize("averaging_penalty", [0.0, 1.0], ids=["a0", "a1"])
+@pytest.mark.parametrize("lengths", [True, False], ids=["w/ lengths", "w/o lengths"])
+def test_cpc_prediction_network_matches_manual_comp(
+    embedding, penc, offset, gutted, averaging_penalty, lengths
+):
     torch.manual_seed(2)
-    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 100
+    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 10_000
     lens = torch.randint(K + 1, T + 1, (N,))
-    lens[0] = T
+    if lengths:
+        lens[0] = T
+    else:
+        lens[:] = T
     sum_lens = lens.sum().item()
     latent, context = torch.randn(sum_lens, Cl), torch.randn(N, T, Cc)
     samp = torch.randint(sum_lens, (N * (T - 1) * M,))
@@ -101,7 +108,16 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset, gut
         penc = RecurrentEncoder(Cc, Cl * (K - gutted))
 
     net = CPCLossNetwork(
-        Cl, Cc, K, M, penc, N if embedding else None, 0, offset, gutted
+        Cl,
+        Cc,
+        K,
+        M,
+        penc,
+        N if embedding else None,
+        0,
+        offset,
+        gutted,
+        averaging_penalty,
     )
     net.eval()
 
@@ -119,6 +135,7 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset, gut
         Az_n = net.prediction_encoder(context_n.unsqueeze(0))[0].squeeze(0)
         assert Az_n.shape == (lens_n, Cl * (K - gutted))
         Az_n = Az_n.view(lens_n, K - gutted, Cl).transpose(0, 1)
+        latent_mean = latent_n[offset:].mean(0)
         for k in range(1 + gutted, K + 1):
             Az_n_k = Az_n[k - gutted - 1]  # (lens_n - 1, Cl)
             for t in range(lens_n - k - 1 - offset):
@@ -130,11 +147,14 @@ def test_cpc_prediction_network_matches_manual_comp(embedding, penc, offset, gut
                 denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0)
                 assert denom.numel() == 1
                 loss_exp = loss_exp - (num - denom)
+                inner = Az_n_k_t @ latent_mean
+                assert inner.numel() == 1
+                loss_exp = loss_exp + averaging_penalty * (inner - 1).square()
                 norm += 1
     loss_exp = loss_exp / norm  # + math.log(M + 1)
 
     latents = torch.nn.utils.rnn.pad_sequence(latents_, True, -1)
-    loss_act = net(latents, context, lens, speakers)
+    loss_act = net(latents, context, lens if lengths else None, speakers)
     assert torch.isclose(loss_exp, loss_act, rtol=1e-1)
 
 
