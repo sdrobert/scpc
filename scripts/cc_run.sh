@@ -1,10 +1,12 @@
 #! /usr/bin/env bash
-#SBATCH --wait
 #SBATCH --time=3:00:00
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=16
+#SBATCH --ntasks-per-node=1
+#SBATCH --nodes=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --array=1-30%1
 #SBATCH --output=exp/slurm_logs/slurm-%A.out
+#SBATCH --open-mode=append
 
 # we don't rely on pytorch-lightning to requeue b/c CC doesn't allow requeuing
 # via scontrol. Following https://docs.alliancecan.ca/wiki/Running_jobs, we
