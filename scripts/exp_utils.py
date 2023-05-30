@@ -91,6 +91,20 @@ def collate_data(
         axis=1,
     )
 
+    # for convenience, we remap any rows with context_type == 'id' to
+    # context_type == 'csa', but with 0 layers and max_width 1
+    # idx = df['context_type'] == 'id'
+    df.loc[
+        df["context_type"] == "id",
+        [
+            "context_type",
+            "csa.num_layers",
+            "csa.num_heads",
+            "csa.dim_feedforward",
+            "csa.max_width",
+        ],
+    ] = ["csa", 0, 8, 1024, 1]
+
     # depopulate the values which were not selected
     latent_types: Sequence[str] = Params.param.latent_type.objects
     for latent_type in latent_types:
