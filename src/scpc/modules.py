@@ -21,7 +21,6 @@ from typing import (
     IO,
     Any,
     BinaryIO,
-    Callable,
     Collection,
     Dict,
     Final,
@@ -49,6 +48,7 @@ __all__ = [
     "Encoder",
     "EncoderSequence",
     "FeedForwardEncoder",
+    "HighPassFilter",
     "IdentityEncoder",
     "RecurrentEncoder",
     "SelfAttentionEncoder",
@@ -791,6 +791,26 @@ class EncoderSequence(Encoder, json_name="seq"):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         # already padded
         return self.encode(x, lens)
+
+
+class HighPassFilter(torch.nn.Module):
+    filter_: torch.Tensor
+
+    def __init__(self, taps: int) -> None:
+        check_positive("taps", taps)
+        super().__init__()
+        filter_ = torch.hann_window(taps, periodic=False)
+        filter_[::2] *= -1
+        self.register_buffer("filter_", filter_.flip(0))
+
+    def forward(self, x: torch.Tensor):
+        W = self.filter_.size(0)
+        N, T, C = x.shape
+        Tp = T + W - 1
+        # causal padding to ensure no lookahead
+        x = torch.nn.functional.pad(x.transpose(1, 2), (W - 1, 0))
+        x = x.as_strided((N * C, T, W), (Tp, 1, 1)) @ self.filter_
+        return x.view(N, C, T).transpose(1, 2)
 
 
 class CPCLossNetwork(torch.nn.Module, Generic[E]):

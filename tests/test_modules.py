@@ -3,6 +3,7 @@ from tempfile import TemporaryFile
 
 import pytest
 import torch
+import numpy as np
 
 from scpc.modules import *
 
@@ -252,3 +253,22 @@ def test_best_rq_loss_network_matches_manual_comp(offset, num_speakers):
     loss_exp = loss_exp / (lens - offset).clamp_min_(0).sum().item()
     loss_act = best_rq(feats, context, lens, sources)
     assert torch.isclose(loss_exp, loss_act)
+
+
+def test_high_pass_filter():
+    torch.manual_seed(6)
+    N, T, C, W = 5, 10, 3, 5
+    x = torch.randn(N, T, C)
+    filter_ = np.hanning(W)
+    filter_[::2] *= -1
+    hfs = HighPassFilter(W)
+    assert torch.allclose(torch.tensor(filter_).float(), hfs.filter_.flip(0))
+    exp = []
+    for x_nc in x.transpose(1, 2).flatten(0, 1):
+        x_nc = np.concatenate([np.zeros(W - 1), x_nc.numpy()])
+        exp_nc = np.convolve(x_nc, filter_, "valid")
+        exp.append(torch.from_numpy(exp_nc))
+    exp = torch.stack(exp).view(N, C, T).transpose(1, 2).float()
+    act = HighPassFilter(W)(x)
+    assert exp.shape == act.shape
+    assert torch.allclose(exp, act)
