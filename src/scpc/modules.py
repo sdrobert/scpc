@@ -919,7 +919,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         self.gutted_steps, self.offset = gutted_steps, offset
 
         if num_speakers is not None:
-            self.embed = torch.nn.Embedding(num_speakers, context_size)
+            self.embed = torch.nn.Embedding(num_speakers, latent_size)
         else:
             self.register_module("embed", None)
 
@@ -934,9 +934,12 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         lens: Optional[torch.Tensor] = None,
         sources: Optional[torch.Tensor] = None,
     ):
-        latent = latent.contiguous()  # necessary for as_strided; might as well do here
         if context is None:
             context = latent
+        if self.embed is not None:
+            assert sources is not None, "sources needed for embedding"
+            latent = latent + self.embed(sources).unsqueeze(1)
+        latent = latent.contiguous()  # necessary for as_strided; might as well do here
 
         N, T, C = latent.shape
         assert N > 0 and T > 0, (N, T)
@@ -945,10 +948,6 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         O, Kp = self.offset, K - G
         Tp = T - K - O
         assert Tp > 0, "prediction window too large for sequences"
-
-        if self.embed is not None:
-            assert sources is not None, "sources needed for embedding"
-            context = context + self.embed(sources).unsqueeze(1)
 
         lens_ = None if lens is None else lens.clamp_max(T - K)
         Az = self.prediction_encoder(context[:, : T - K], lens_)[0]  # (N, T - K, Kp* C)

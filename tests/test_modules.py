@@ -89,25 +89,19 @@ def test_cpc_prediction_network_matches_manual_comp(
     embedding, penc, offset, gutted, averaging_penalty, lengths
 ):
     torch.manual_seed(2)
-    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 10_000
+    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 200_000
     lens = torch.randint(K + 1, T + 1, (N,))
     if lengths:
         lens[0] = T
     else:
         lens[:] = T
     sum_lens = lens.sum().item()
-    latent, context = torch.randn(sum_lens, Cl), torch.randn(N, T, Cc)
-    samp = torch.randint(sum_lens, (N * (T - 1) * M,))
-    latent_samp = latent[samp].view(N, T - 1, M, Cl)
-    speakers = torch.randint(N, (N,))
-
     if penc == "ff":
         penc = None
     elif penc == "csa":
         penc = CausalSelfAttentionEncoder(Cc, Cl * (K - gutted), num_heads=1)
     else:
         penc = RecurrentEncoder(Cc, Cl * (K - gutted))
-
     net = CPCLossNetwork(
         Cl,
         Cc,
@@ -122,17 +116,26 @@ def test_cpc_prediction_network_matches_manual_comp(
     )
     net.eval()
 
+    latent, context = torch.randn(sum_lens, Cl), torch.randn(N, T, Cc)
+    speakers = torch.randint(N, (N,))
+    samp = torch.randint(sum_lens, (N * (T - 1) * M,))
+    if embedding:
+        latent_samp = (latent + net.embed(speakers).repeat_interleave(lens, 0))[samp]
+    else:
+        latent_samp = latent[samp]
+    latent_samp = latent_samp.view(N, T - 1, M, Cl)
+
     loss_exp, latents_ = 0.0, []
     norm = 0
     for n in range(N):
         lens_n = lens[n]
         latent_n, latent = latent[:lens_n], latent[lens_n:]
         latents_.append(latent_n)
-        assert latent_n.size(0) == lens_n
-        context_n = context[n, :lens_n]
-        if embedding:
-            context_n = context_n + net.embed(speakers[n : n + 1])
         latent_samp_n = latent_samp[n]
+        assert latent_n.size(0) == lens_n
+        if embedding:
+            latent_n = latent_n + net.embed(speakers[n : n + 1])
+        context_n = context[n, :lens_n]
         Az_n = net.prediction_encoder(context_n.unsqueeze(0))[0].squeeze(0)
         assert Az_n.shape == (lens_n, Cl * (K - gutted))
         Az_n = Az_n.view(lens_n, K - gutted, Cl).transpose(0, 1)
