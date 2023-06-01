@@ -10,7 +10,8 @@ usage () {
         "[-$EXP_FLG DIR] [-$VER_FLG I] [-$PRC_FLG N]"\
         "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"\
         "[-$PCA_FLG {${!PCAS[*]}}]"\
-        "[-$MDL_FLG {${!MDLS[*]}}]"
+        "[-$MDL_FLG {${!MDLS[*]}}]"\
+        "[-$TSK_FLG {${!STASK2DARG[*]}}]"
     if ((ret == 0)); then
         cat << EOF 1>&2
 $help_message
@@ -32,6 +33,8 @@ Options
  -$XTR_FLG      Extra args to pass to trainer (./run.sh only)
  -$PCA_FLG      Number of dimensions to reduce output to.
             (default: no dim reduction; ./scripts/{zrc,superb}_run.sh only)
+ -$TSK_FLG      SUPERB task to run
+            (default: $stask; ./scripts/superb_run.sh only)
 EOF
     fi
     exit "${1:-1}"
@@ -50,6 +53,7 @@ WRK_FLG=w
 LIB_FLG=l
 XTR_FLG=x
 PCA_FLG=P
+TSK_FLG=t
 
 DEFT_FT=raw
 declare -A FTS=( [raw]=x [fbank]=x [fbank-80]=x [superb.fbank]=x )
@@ -99,6 +103,17 @@ fi
 
 declare -A PCAS=( [8]=x [16]=x [32]=x [64]=x [128]=x )
 
+declare -A STASK2DARG=( [pr]=ctc [asr]=asr )
+declare -A SASRPART2IDX=(
+    [train-clean-100]=0
+    [train-clean-360]=1
+    [train-other-500]=2
+    [dev-clean]=3
+    [dev-other]=4
+    [test-clean]=5
+    [test-other]=6
+)
+
 # variables
 data="data"
 exp="exp"
@@ -112,8 +127,9 @@ xtra_args=
 pca=
 cmd=
 cmd_p=
+stask=pr
 
-while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:" opt; do
+while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:" opt; do
     case $opt in
         ${HLP_FLG})
             usage 0
@@ -160,6 +176,10 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${
             argcheck_is_a_choice $opt "${!PCAS[@]}" "$OPTARG"
             pca="$OPTARG"
             ;;
+        ${TSK_FLG})
+            argcheck_is_a_choice $opt "${!STASK2DARG[@]}" "$OPTARG"
+            stask="$OPTARG"
+            ;;
         *)
             usage
             ;;
@@ -172,6 +192,10 @@ fi
 
 if [[ ! "$0" =~ "_run.sh" ]] && [ ! -z "$pca" ]; then
     echo "-$PCA_FLG $pca set, but in ./run.sh; ignoring"
+fi
+
+if [[ ! "$0" =~ "superb_run.sh" ]] && [ "$stask" != "pr" ]; then
+    echo "-$TSK_FLG $stask set, but not in ./scripts/superb_run.sh; ignoring"
 fi
 
 # the first step is always to write the config file to the experiment
@@ -236,3 +260,5 @@ else
     expert_config="$em/expert.args.pca_$pca.txt"
 fi
 expert_args="$(cat "$expert_config")"
+
+darg="${STASK2DARG[$stask]}"

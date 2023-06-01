@@ -35,14 +35,14 @@ if [ "$CONDA_DEFAULT_ENV" = "base" ]; then
 fi
 
 # command-line option parsing
-help_message="Evaluate pre-trained model on SUPERB phone rec task"
+help_message="Evaluate pre-trained model on a SUPERB downstream task"
 source scripts/preamble.sh
 
 dl="$data/librispeech"
 if [ -z "$pca" ]; then
-  sp="$em/superb/pr/full"
+  sp="$em/superb/$stask/full"
 else
-  sp="$em/superb/pr/pca_$pca"
+  sp="$em/superb/$stask/pca_$pca"
 fi
 
 
@@ -69,28 +69,44 @@ if [ -z "$libri" ]; then
 fi
 
 if [ ! -f "$sp/config.yaml" ]; then
+    echo "Writing config"
     mkdir -p "$sp"
     {
-        export libri nwork
-        cat "conf/superb.pr.config.template.yaml" | envsubst
+        export libri nwork sp
+        cat "conf/superb.$stask.config.template.yaml" | envsubst
     } > "$sp/config.yaml"
     ((only)) && exit 0
 fi
 
+if [ "$stask" = "asr" ]; then
+    mkdir -p "$sp/len_for_bucket"
+    for sasrpart in train-clean-100 dev-clean test-clean; do
+        if [ ! -f "$sp/len_for_bucket/$sasrpart.csv" ]; then
+            echo "Making $sasrpart length buckets"
+            echo "${SASRPART2IDX[$sasrpart]}" |
+            python s3prl/s3prl/preprocess/generate_len_for_bucket.py \
+                -i "$libri" -o "$sp" -a .flac --n_jobs $nwork
+            ((only)) && exit 0
+        fi
+    done
+fi
+
+
 if [ ! -f "$sp/.train_complete" ]; then
-    set -x
+    echo "Training for SUPERB task $stask using model $md"
     $cmd python s3prl/s3prl/run_downstream.py \
         -p "$sp" \
         -c "$sp/config.yaml" \
         "${superb_flags[@]}" \
         -m train \
-        -d ctc \
+        -d $darg \
         -a
     touch "$sp/.train_complete"
     ((only)) && exit 0
 fi
 
 if [ ! -f "$sp/results.txt" ]; then
+    echo "Evaluating for SUPERB task $stask using model $md"
     $cmd python s3prl/s3prl/run_downstream.py \
         -m evaluate -e "$sp/dev-best.ckpt" | 
         grep "test per" | tee "$sp/results.txt" || \
