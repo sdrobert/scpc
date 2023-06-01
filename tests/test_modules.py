@@ -89,7 +89,7 @@ def test_cpc_prediction_network_matches_manual_comp(
     embedding, penc, offset, gutted, averaging_penalty, lengths
 ):
     torch.manual_seed(2)
-    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 200_000
+    N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 100_000
     lens = torch.randint(K + 1, T + 1, (N,))
     if lengths:
         lens[0] = T
@@ -139,7 +139,7 @@ def test_cpc_prediction_network_matches_manual_comp(
         Az_n = net.prediction_encoder(context_n.unsqueeze(0))[0].squeeze(0)
         assert Az_n.shape == (lens_n, Cl * (K - gutted))
         Az_n = Az_n.view(lens_n, K - gutted, Cl).transpose(0, 1)
-        latent_mean = latent_n[offset:].mean(0)
+        mse = latent_n[offset:].mean(0).square().mean()
         for k in range(1 + gutted, K + 1):
             Az_n_k = Az_n[k - gutted - 1]  # (lens_n - 1, Cl)
             for t in range(lens_n - k - 1 - offset):
@@ -151,9 +151,7 @@ def test_cpc_prediction_network_matches_manual_comp(
                 denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0)
                 assert denom.numel() == 1
                 loss_exp = loss_exp - (num - denom)
-                inner = Az_n_k_t @ latent_mean
-                assert inner.numel() == 1
-                loss_exp = loss_exp + averaging_penalty * (inner - 1).square()
+                loss_exp = loss_exp + averaging_penalty * mse
                 norm += 1
     loss_exp = loss_exp / norm  # + math.log(M + 1)
 

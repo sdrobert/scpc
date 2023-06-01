@@ -978,6 +978,11 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         loss = denom - num  # neg num - denom
         if lens is not None:
             mask_ = ~get_length_mask(loss, lens - K - O, seq_dim=1)
+        if lens is None:
+            loss = loss.mean()
+        else:
+            loss = loss.masked_fill(mask_, 0.0).sum()
+            loss = loss / norm
         if self.averaging_penalty > 0.0:
             if lens is None:
                 latent = latent[:, O:].mean(1)  # (N, C)
@@ -985,13 +990,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
                 mask = mask.transpose(1, 2).to(latent)
                 mask /= mask.sum(2, keepdim=True).clamp_min_(1.0)
                 latent = (latent.transpose(1, 2) * mask).sum(2)
-            inner = torch.bmm(Az.view(N, Tp * Kp, C), latent.unsqueeze(2)).view_as(loss)
-            loss = loss + (inner - 1).square() * self.averaging_penalty
-        if lens is None:
-            loss = loss.mean()
-        else:
-            loss = loss.masked_fill(mask_, 0.0).sum()
-            loss = loss / norm
+            loss = loss + latent.square().mean() * self.averaging_penalty
         return loss  # + math.log(M + 1)
 
 
