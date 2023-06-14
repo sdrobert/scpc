@@ -97,10 +97,6 @@ if [ -z "${MDLS["cpc.deft"]}" ]; then
     echo -e "Missing cpc.deft!"
     exit 1
 fi
-if [[ "$0" =~ "superb_run.sh" ]]; then
-    MDLS["superb.fbank"]=x
-fi
-
 declare -A PCAS=( [8]=x [16]=x [32]=x [64]=x [128]=x )
 
 declare -A STASK2DARG=( [pr]=ctc [asr]=asr )
@@ -113,6 +109,11 @@ declare -A SASRPART2IDX=(
     [test-clean]=5
     [test-other]=6
 )
+
+if [[ "$0" =~ "superb_run.sh" ]]; then
+    MDLS["superb.fbank"]=x
+    TR2DESC["superb"]="Consult SUPERB recipe for more information"
+fi
 
 # variables
 data="data"
@@ -203,19 +204,30 @@ fi
 # up what we've got
 em="$exp/$model/version_$ver"
 cfg="$em/model.yaml"
-if [ ! -f "$em/model.yaml" ]; then
-    # this first step ensures conf/model.$model.yaml can be read as-is by
-    # the scpc command. The second joins all the default configuration values
-    # with the modified ones. The latter ensures the model always trains with
-    # a specific configuration, even if the defaults are changed later.
-    echo "Checking configuration conf/model.$model.yaml parses"
-    $cmd_p scpc-train --read-model-yaml "conf/model.$model.yaml" -h > /dev/null
-    echo "Writing $model configuration to '$cfg'"
+if [ ! -f "$cfg" ]; then
     mkdir -p "$em"
-    $cmd_p scpc-train --print-model-yaml | \
-        combine-yaml-files --quiet --nested \
-            - "conf/model.$model.yaml" "$cfg"
-    ((only)) && exit 0
+    if [[ "$model" =~ ^superb ]]; then
+        cat <<EOF > "$cfg"
+name: $model
+system_description: SUPERB default model $model
+feat_type: raw
+train_part: superb
+EOF
+        ((only)) && exit 0
+    else
+        # this first step ensures conf/model.$model.yaml can be read as-is by
+        # the scpc command. The second joins all the default configuration
+        # values with the modified ones. The latter ensures the model always
+        # trains with a specific configuration, even if the defaults are
+        # changed later.
+        echo "Checking configuration conf/model.$model.yaml parses"
+        $cmd_p scpc-train --read-model-yaml "conf/model.$model.yaml" -h > /dev/null
+        echo "Writing $model configuration to '$cfg'"
+        $cmd_p scpc-train --print-model-yaml | \
+            combine-yaml-files --quiet --nested \
+                - "conf/model.$model.yaml" "$cfg"
+        ((only)) && exit 0
+    fi
 fi
 
 ft="$(awk -v ft=$DEFT_FT '$1 == "feat_type:" {ft=$2} END {print ft}' "$cfg")"

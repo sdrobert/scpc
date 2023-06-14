@@ -1,7 +1,7 @@
 runner:
   total_steps: 200000
   gradient_clipping: 1
-  gradient_accumulate_steps: 1
+  gradient_accumulate_steps: 4
   log_step: 100
   eval_step: 2000
   save_step: 500
@@ -12,7 +12,7 @@ runner:
 optimizer:
   name: TorchOptim
   torch_optim_name: Adam
-  lr: 1.0e-4
+  lr: 5.0e-4
 
 # comment the whole scheduler config block
 # to disable learning rate scheduling

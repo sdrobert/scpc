@@ -46,8 +46,8 @@ else
 fi
 
 
-if [[ "$ft" =~ ^superb. ]]; then
-    superb_flags=( "-u" "${ft:7}" )
+if [[ "$model" =~ ^superb. ]]; then
+    superb_flags=( "-u" "${model:7}" )
 else
     ckpt="$em/best.ckpt"
     if [ ! -f "$ckpt" ]; then
