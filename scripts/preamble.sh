@@ -73,7 +73,7 @@ DEFT_SYS="Unknown"
 DEFT_TR=100
 declare -A TR2DESC=( [100]="librispeech train-clean-100" )
 declare -A TR2DL_ARGS=(
-    [100]="--files {test,dev}-{clean,other}.tar.gz train-clean-100.tar.gz librispeech-vocab.txt"
+    [100]="--files test-clean.tar.gz test-other.tar.gz dev-clean.tar.gz dev-other.tar.gz train-clean-100.tar.gz librispeech-vocab.txt"
 )
 declare -A TR2TD_ARGS=(
     [100]="--compute-up-to 100"
