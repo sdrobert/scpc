@@ -18,6 +18,7 @@ from scpc.modules import *
         RecurrentEncoder,
         SelfAttentionEncoder,
         EncoderSequence,
+        CausalConvEncoder,
     ],
     ids=[
         "CausalSelfAttentionEncoder",
@@ -27,6 +28,7 @@ from scpc.modules import *
         "RecurrentEncoder",
         "SelfAttentionEncoder",
         "EncoderSequence",
+        "CausalConvEncoder",
     ],
 )
 def test_encoder_variable_batches(Encoder: Type[Encoder]):
@@ -66,6 +68,23 @@ def test_causal_self_attention_encoder_is_causal():
     N, T, H = 3, 13, 17
     x = torch.rand(N, T, H)
     encoder = CausalSelfAttentionEncoder(H, 2 * H, T // 2 - 1, num_heads=1)
+    encoder.eval()
+    x1 = encoder(x)[0][:, : T // 2]
+    x2 = encoder(x[:, : T // 2])[0]
+    assert x1.shape == x2.shape
+    assert torch.allclose(x1, x2, atol=1e-5)
+    x1 = x1[:, -2:]
+    x2 = encoder(x[:, 1 : T // 2])[0][:, -2:]
+    assert not torch.allclose(x1[:, 0], x2[:, 0], atol=1e-5)
+    assert torch.allclose(x1[:, 1], x2[:, 1], atol=1e-5)
+
+
+def test_causal_conv_encoder_is_causal():
+    torch.manual_seed(420)
+    N, T, H = 5, 12, 20
+    x = torch.rand(N, T, H)
+    # for 2 layers + kernel T // 4, receptive field is T // 2 - 1
+    encoder = CausalConvEncoder(H, 2 * H, T // 4, num_layers=2)
     encoder.eval()
     x1 = encoder(x)[0][:, : T // 2]
     x2 = encoder(x[:, : T // 2])[0]
@@ -178,6 +197,7 @@ def test_checkpoints(from_class):
         SelfAttentionEncoder(H),
         EncoderSequence(IdentityEncoder(H)),
         ConvEncoder(H, norm_style="channel"),
+        CausalConvEncoder(H, kernel_size=3, num_layers=3),
     )
     f = TemporaryFile()
     encoder1.eval()
