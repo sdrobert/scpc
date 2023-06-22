@@ -57,7 +57,7 @@ if [ ! -f "$dl/.${tr}_complete" ]; then
     echo "Performing common prep of librispeech"
     $cmd_p python prep/librispeech.py "$dl" preamble \
         --speakers-are-readers --exclude-subsets "$libri"
-    $cmd_p python prep/librispeech.py "$dl" init_word "$libri"
+    $cmd_p python prep/librispeech.py "$dl" init_char "$libri"
     touch "$dl/.${tr}_complete"
     ((only)) && exit 0
 fi
@@ -65,7 +65,7 @@ fi
 if [ ! -f "$dlf/.${tr}_complete" ]; then
     echo "Computing $ft features of librispeech"
     $cmd_p python prep/librispeech.py \
-        "$dl" torch_dir wrd $ft ${FT2TD_ARGS[$ft]} ${TR2TD_ARGS[$tr]}
+        "$dl" torch_dir char $ft ${FT2TD_ARGS[$ft]} ${TR2TD_ARGS[$tr]}
     touch "$dlf/.${tr}_complete"
     ((only)) && exit 0
 fi
