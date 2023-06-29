@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
 import os
 import argparse
 import glob
 
 from typing import Optional, Sequence
+from itertools import chain
 
 import torch
 import numpy as np
@@ -55,6 +55,7 @@ def main(args: Optional[Sequence[str]] = None):
         help="Whether to store as .npy files",
     )
     parser.add_argument("--audio-suffix", default=".wav", help="Suffix of audio files")
+    parser.add_argument('--device', default=None, type=torch.device, help="What device to compute features on. Defaults to CUDA if available")
     parser.add_argument(
         "--force-as",
         default=None,
@@ -87,9 +88,19 @@ def main(args: Optional[Sequence[str]] = None):
 
     options = parser.parse_args(args)
 
-    expert = UpstreamExpert(options.ckpt, options=options)
+    if options.device is None:
+        if torch.cuda.is_available():
+            options.device = torch.device(torch.cuda.current_device())
+        else:
+            options.device = torch.device('cpu')
 
-    for inf in glob.iglob(f"{glob.escape(options.in_dir)}/**/*{options.audio_suffix}"):
+    expert = UpstreamExpert(options.ckpt, options=options).to(options.device)
+
+    in_dir = glob.escape(options.in_dir)
+    for inf in chain(
+        glob.iglob(f"{in_dir}/**/*{options.audio_suffix}"),
+        glob.iglob(f"{in_dir}/*{options.audio_suffix}")
+    ):
         utt_id = os.path.basename(inf).rsplit(options.audio_suffix, 1)[0]
         signal = sutil.read_signal(inf, dtype=np.float32, force_as=options.force_as)
         if options.channel == -1 and signal.ndim > 1 and signal.shape[0] > 1:
@@ -106,7 +117,7 @@ def main(args: Optional[Sequence[str]] = None):
             )
         if signal.ndim != 1:
             signal = signal[options.channel]
-        signal = torch.from_numpy(signal)
+        signal = torch.from_numpy(signal).to(options.device)
         odir = os.path.join(
             options.out_dir,
             os.path.relpath(os.path.dirname(inf), options.in_dir),

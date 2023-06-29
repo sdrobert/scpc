@@ -41,6 +41,8 @@ source scripts/preamble.sh
 
 dl="$data/librispeech"
 em="$exp/$model/version_$ver"
+bl="$em/baseline"
+ckpt2="$bl/best.pt"
 # XXX(sdrobert): we save to experiment dir because reps are specific to the
 # experiment
 dlf="$em/reps"
@@ -71,34 +73,76 @@ if [ ! -f "$dl/.960_complete2" ]; then
     $cmd_p python prep/librispeech.py "$dl" preamble \
         --speakers-are-readers --exclude-subsets "$libri"
     $cmd_p python prep/librispeech.py "$dl" init_char "$libri" \
-        --custom-lm-max-order 15 --custom-lm-prune-count 1
+        --custom-lm-max-order 10 \
+        --custom-lm-prune-counts 0 0 0 0 0 1 1 1 2 3
     touch "$dl/.960_complete2"
     ((only)) && exit 0
 fi
 
-for x in train-clean-100 dev-clean dev-other test-other; do
-  y="${x//-/_}"
-  pdir="$dlf/$y"
+for x in train_clean_100 dev_clean dev_other test_clean test_other; do
+  pdir="$dlf/$x"
   if [ ! -f "$pdir/.a2r_complete" ]; then
     echo "Computing representations in $pdir"
-    tmp="$em/tmp"
+    tmp="$em/tmp/$x"
     mkdir -p "$tmp" "$pdir/feat"
-    head -n 5 "$dl/local/char/$y.wav.scp" | xargs -I {} bash -c 'ln -sf "${1#* }" "${1%% *}.flac" ' -- "$tmp/"{}
-    exit 1
+    cat "$dl/local/char/$x.wav.scp" | xargs -P $nwork -I {} bash -c '
+ln -sf "${1#* }" "${1%% *}.flac" ' -- "$tmp/"{}
     $cmd_p scpc-a2r $expert_args --audio-suffix .flac \
-        "$libri/$x" "$ckpt" "$pdir/feat"
+        "$tmp" "$ckpt" "$pdir/feat"
     touch "$pdir/.a2r_complete"
     ((only)) && exit 0
   fi
+  rm -rf "$em/tmp"
 done
 
 if [ ! -f "$dlf/.100_complete" ]; then
     echo "Converting into SpectDataSet"
-    mkdir -p "$em/local"
-    cp -r "$dl/local/char/" "$em/local/char" 
+    ln -sf "$(cd "$dl/local"; pwd -P)" "$dlf/../local"
     $cmd_p python prep/librispeech.py \
-        "$em" torch_dir char reps --feats-from "$dlf" ${TR2TD_ARGS[100]}
+        "$dlf/.." torch_dir char reps --feats-from reps ${TR2TD_ARGS[100]}
+    $cmd_p prep/arpa-lm-to-state-dict.py \
+        --save-sos \
+        "$dlf/ext/"{arpa.lm.gz,token2id.txt,lm.pt}
+    $cmd_p compute-mvn-stats-for-torch-feat-data-dir \
+        --num-workers $nwork \
+        "$dlf/train_clean_100/feat" "$dlf/ext/mvn.pt"
+    rm -f "$dlf/../local"
     touch "$dlf/.100_complete"
     ((only)) && exit 0
 fi
 
+for x in model data training; do
+    f="$bl/$x.yaml"
+    if [ ! -f "$f" ]; then
+        echo "Writing $f"
+        mkdir -p "$bl"
+        export input_size="$(scpc-info $expert_args "$ckpt" | awk '$1 == "output_size" {print $2}')"
+        export vocab_size="$(awk -v v=0 '{if ($1 > v) v=$1} END {print v + 1}' "$dlf/ext/id2token.txt")"
+        export eos="$(awk '$2 == "</s>" {print $1}' "$dlf/ext/id2token.txt")"
+        cat "conf/baseline.$x.template.yaml" | envsubst > "$f"
+        ((only)) && exit 0
+    fi
+done
+
+if [ ! -f "$ckpt2" ]; then
+    echo "Training baseline for $model"
+    if [ $nproc -gt 1 ]; then
+        train_script="torchrun --standalone --nproc_per_node=$nproc"
+        xtra_args="--distributed-backend nccl $x"
+    else
+        train_script=""
+    fi
+    state_dir="$bl/states"
+    mkdir -p "$state_dir"
+    $cmd $train_script prep/asr_baseline.py \
+        --read-model-yaml "$bl/model.yaml" \
+        --num-workers $nwork \
+        --mvn-path "$dlf/ext/mvn.pt" \
+        train \
+            --read-data-yaml "$bl/data.yaml" \
+            --read-training-yaml "$bl/training.yaml" \
+            --state-dir "$state_dir" \
+            --state-csv "$bl/training.csv" \
+            $xtra_args "$dlf/"{train_clean_100,dev_clean} "$ckpt2"
+    ((only)) && exit 0
+fi
