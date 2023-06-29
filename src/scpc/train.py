@@ -49,6 +49,23 @@ class ConvEncoderParams(param.Parameterized):
     )
 
 
+class CausalConvEncoderParams(param.Parameterized):
+    output_size: int = param.Integer(
+        512, bounds=(1, None), doc="Size of the output (channels)"
+    )
+    num_layers: int = param.Integer(
+        1, bounds=(1, None), doc="Number of convolutional layers"
+    )
+    kernel_size: int = param.Integer(
+        8, bounds=(1, None), doc="Width of the convolutional kernel (per layer)"
+    )
+    nonlin_type: Literal["relu", "sigmoid", "tanh", "none"] = param.ObjectSelector(
+        "relu",
+        ["relu", "sigmoid", "tanh", "none"],
+        doc="Type of nonlinearity to apply after convolutional layers",
+    )
+
+
 class FeedForwardEncoderParams(param.Parameterized):
     output_size: int = param.Integer(256, bounds=(1, None), doc="Size of the output")
     nonlin_type: Literal["relu", "sigmoid", "tanh", "none"] = param.ObjectSelector(
@@ -156,9 +173,7 @@ class BestRqLossParams(param.Parameterized):
         8192, bounds=(1, None), doc="Number of quantized vectors in codebook"
     )
     codebook_dim: int = param.Integer(
-        16,
-        bounds=(1, None),
-        doc="Size of quantized vector in codebook",
+        16, bounds=(1, None), doc="Size of quantized vector in codebook",
     )
     num_speakers: Optional[int] = param.Integer(
         None,
@@ -315,12 +330,12 @@ class LightningPretrainedFrontendParams(param.Parameterized):
         doc="Which encoder to use for the 'latent' part of the model. 'conv' is "
         "convolutional; 'ff' is feed-forward; 'id' is identity (noop)",
     )
-    context_type: Literal["csa", "sa", "recur", "id"] = param.ObjectSelector(
+    context_type: Literal["csa", "sa", "recur", "cconv", "id"] = param.ObjectSelector(
         "recur",
-        ["csa", "sa", "recur", "id"],
+        ["csa", "sa", "recur", "cconv", "id"],
         doc="Which encoder to use for the 'context' part of the model. 'csa' is "
         "causal self-atttention; 'sa' is self-attention (non-causal); 'recur' is "
-        "recurrent; 'id' is identity (noop)",
+        "recurrent; 'cconv' is causal convolution; 'id' is identity (noop)",
     )
 
     conv: Optional[ConvEncoderParams] = param.ClassSelector(
@@ -349,6 +364,11 @@ class LightningPretrainedFrontendParams(param.Parameterized):
         instantiate=False,
         doc="Parameters for context recurrent encoder (if context_type = 'recur')",
     )
+    cconv: Optional[CausalConvEncoderParams] = param.ClassSelector(
+        CausalConvEncoderParams,
+        instantiate=False,
+        doc="Parameters for context causal conv encoder (if context_type = 'cconv')",
+    )
 
     training: Optional[TrainingParams] = param.ClassSelector(
         TrainingParams, instantiate=False, doc="Parameters for training"
@@ -365,6 +385,8 @@ class LightningPretrainedFrontendParams(param.Parameterized):
             self.sa = SelfAttentionEncoderParams(name="sa")
         if self.recur is None:
             self.recur = RecurrentEncoderParams(name="recur")
+        if self.cconv is None:
+            self.cconv = CausalConvEncoderParams(name="cconv")
         if self.training is None:
             self.training = TrainingParams(name="training")
         self.training.initialize_missing()
@@ -464,6 +486,17 @@ class LightningPretrainedFrontend(pl.LightningModule):
                 params.recur.output_size,
                 params.recur.num_layers,
                 params.recur.recurrent_type,
+                params.training.dropout_prob,
+            )
+        elif params.context_type == "cconv":
+            if params.cconv is None:
+                raise ValueError("params.cconv not initialized")
+            self.context = CausalConvEncoder(
+                self.latent.output_size,
+                params.cconv.output_size,
+                params.cconv.kernel_size,
+                params.cconv.num_layers,
+                params.cconv.nonlin_type,
                 params.training.dropout_prob,
             )
         elif params.context_type == "id":
@@ -743,9 +776,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
         return feats, None, None, feat_sizes, None, utt_ids
 
     def forward(
-        self,
-        feats: torch.Tensor,
-        feat_lens: Optional[torch.Tensor] = None,
+        self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         return self.get_inference_model().forward(feats, feat_lens)
 
@@ -780,11 +811,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
             )
 
         grp = pargparse.add_deserialization_group_to_parser(
-            parser,
-            params,
-            "params",
-            reckless=True,
-            flag_format_str=read_format_str,
+            parser, params, "params", reckless=True, flag_format_str=read_format_str,
         )
         return grp
 

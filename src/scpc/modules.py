@@ -504,7 +504,7 @@ class CausalConvEncoder(Encoder, json_name="cconv"):
         self,
         input_size: int,
         output_size: Optional[int] = None,
-        kernel_size: int = 5,
+        kernel_size: int = 8,
         num_layers: int = 2,
         nonlin_type: NonlinearityType = "relu",
         dropout_prob: float = 0.0,
