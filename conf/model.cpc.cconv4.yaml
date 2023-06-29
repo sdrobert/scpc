@@ -1,0 +1,21 @@
+name: cpc.cconv4
+system_description: "CPC-small but with conv context and 4-frame window"
+context_type: cconv
+conv:
+  output_size: 256
+cconv:
+  output_size: 1024
+  kernel_size: 4
+training:
+  num_devices:
+  data:
+    common:
+      batch_size: 12
+      drop_last: true
+  cpc_loss:
+    prediction_type: csa
+    offset: 3
+    prediction_steps: 6
+    gutted_steps: 5
+  chunking:
+    max_chunks: 64
