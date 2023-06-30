@@ -1,8 +1,8 @@
 #! /usr/bin/env bash
 
 #SBATCH --nodes=1
-#SBATCH --mem-per-cpu=2G
-#SBATCH --cpus-per-task=8
+#SBATCH --mem=16G
+#SBATCH --cpus-per-task=16
 #SBATCH --output=exp/slurm_logs/%j.out
 
 set -e
