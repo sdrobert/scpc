@@ -134,26 +134,57 @@ if [ $tr = 100 ]; then
         ((only)) && exit 0
     fi
 
-    for x in train test; do
-        if [ ! -f "$dlf/train_clean_100_${x}_subset/.complete" ]; then
-            echo "Making $x subset of train_clean_100"
-            rm -rf "$dlf/train_clean_100_${x}_subset"
-            $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
-                "$dlf/train_clean_100"{,_${x}_subset} \
-                --symlink \
-                --utt-list-file resources/train_clean_100_${x}_subset.txt
-            touch "$dlf/train_clean_100_${x}_subset/.complete"
-            ((only)) && exit 0
-        fi
-    done
+    # There's a slight mismatch between the utterances of 
+    #   train_clean_100 - train_clean_100_test_subset
+    # and
+    #   train_clean_100_train_subset
+    # which is why we handle training subset of 'train_clean_100' specially
+    if [ ! -f "$dlf/train_clean_100_train_subset/.complete" ]; then
+        echo "Making train subset of train_clean_100"
+        rm -rf "$dlf/train_clean_100_train_subset"
+        $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
+            "$dlf/train_clean_100"{,_train_subset} \
+            --symlink \
+            --utt-list-file resources/train_clean_100_train_subset.txt
+        touch "$dlf/train_clean_100_train_subset/.complete"
+        ((only)) && exit 0
+    fi
+fi
+
+if [ ! -f "$dlf/${tdir}_train_subset/.complete" ]; then
+    echo "Making train subset of $tdir"
+    rm -rf "$dlf/${tdir}_train_subset"
+    mkdir -p "$dlf/${tdir}_train_subset"
+    find "$dlf/$tdir/feat" -name '*.pt' -exec basename {} \; | \
+        cut -d '.' -f 1 | \
+        join -v1 - <(sort resources/train_clean_100_test_subset.txt) \
+            > "$dlf/${tdir}_train_subset/uttids"
+    $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
+        "$dlf/$tdir"{,_train_subset} \
+        --symlink \
+        --utt-list-file "$dlf/${tdir}_train_subset/uttids"
+    rm "$dlf/${tdir}_train_subset/uttids"
+    touch "$dlf/${tdir}_train_subset/.complete"
+    ((only)) && exit 0
+fi
+
+if [ ! -f "$dlf/${tdir}_test_subset/.complete" ]; then
+    echo "Making test subset of $tdir"
+    rm -rf "$dlf/${tdir}_test_subset"
+    $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
+        "$dlf/$tdir"{,_test_subset} \
+        --symlink \
+        --utt-list-file resources/train_clean_100_test_subset.txt
+    touch "$dlf/${tdir}_test_subset/.complete"
+    ((only)) && exit 0
 fi
 
 if [ ! -f "$ckpt" ]; then
     echo "Training $model model"
     $cmd scpc-train \
             --read-model-yaml "$em/model.yaml" \
-            "$dlf/${TR2TDIR[$tr]}_train_subset" \
-            "$dlf/${TR2TDIR[$tr]}_test_subset" \
+            "$dlf/${tdir}_train_subset" \
+            "$dlf/${tdir}_test_subset" \
             --root-dir "$exp" \
             "--version=$ver" "--num-workers=$nwork" $xtra_args
     [ -f "$ckpt" ] || exit 1
@@ -168,7 +199,7 @@ for pca in "${!PCAS[@]}"; do
         echo "PCA of dim $pca being performed for $model"
         $cmd_p scpc-pca \
             --read-yaml conf/pca.yaml --device cuda --num-workers=$nwork \
-            "$dlf/${TR2TDIR[$tr]}_test_subset" "$ckpt" $pca "$pcaf"
+            "$dlf/${tdir}_test_subset" "$ckpt" $pca "$pcaf"
         ((only)) && exit 0
     fi
 done
