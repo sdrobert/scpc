@@ -320,6 +320,7 @@ class LightningPretrainedFrontendParams(param.Parameterized):
         "", doc="Description of the system for ZRC submission"
     )
     feat_type: str = param.String("raw", doc="The type of feature expected as input")
+    train_part: str = param.String("100", doc="The pre-training data identifier")
     input_size: int = param.Integer(
         1, bounds=(1, None), doc="Size of input feature dimension (1 for raw)"
     )

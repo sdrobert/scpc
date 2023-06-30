@@ -71,15 +71,22 @@ declare -A FT2PAD=(
 DEFT_SYS="Unknown"
 
 DEFT_TR=100
-declare -A TR2DESC=( [100]="librispeech train-clean-100" )
+BASE_FILES="test-clean.tar.gz test-other.tar.gz dev-clean.tar.gz dev-other.tar.gz train-clean-100.tar.gz librispeech-vocab.txt"
+declare -A TR2DESC=( [100]="librispeech train-clean-100" [460]="librispeech train-clean-*" [960]="librispeech train-*" )
 declare -A TR2DL_ARGS=(
-    [100]="--files test-clean.tar.gz test-other.tar.gz dev-clean.tar.gz dev-other.tar.gz train-clean-100.tar.gz librispeech-vocab.txt"
+    [100]="--files $BASE_FILES"
+    [460]="--files $BASE_FILES train-clean-360.tar.gz"
+    [960]="--files $BASE_FILES train-clean-360.tar.gz train-other-500.tar.gz"
 )
 declare -A TR2TD_ARGS=(
     [100]="--compute-up-to 100"
+    [460]="--compute-up-to 360 --aggregate-by-symlink"
+    [960]="--aggregate-by-symlink"
 )
 declare -A TR2TDIR=(
     [100]="train_clean_100"
+    [460]="train_clean_460"
+    [960]="train_all_960"
 )
 
 declare -A MDLS
@@ -209,9 +216,9 @@ if [ ! -f "$cfg" ]; then
     if [[ "$model" =~ ^superb ]]; then
         cat <<EOF > "$cfg"
 name: $model
-system_description: SUPERB default model $model
+system_description: "SUPERB default model $model"
 feat_type: raw
-train_part: superb
+train_part: "superb"
 EOF
         ((only)) && exit 0
     else
@@ -236,11 +243,12 @@ if [ -z "${FTS[$ft]}" ]; then
     exit 1
 fi
 
-tr="$(awk -v tr=$DEFT_TR '$1 == "train_part:" {tr=$2} END {print tr}' "$cfg")"
+tr="$(awk -v tr=$DEFT_TR '$1 == "train_part:" {gsub(/["'"'"']/, "", $2); tr=$2} END {print tr}' "$cfg")"
 if [ -z "${TR2DESC[$tr]}" ]; then
     echo "expected train_part: in '$cfg' to be one of ${!TR2DESC[*]}; got $tr"
     exit 1
 fi
+tdir="${TR2TDIR[$tr]}"
 train_description="${TR2DESC[$tr]}"
 
 system_description="$(awk -v s="$DEFT_SYS" '$1 == "system_description:" {$1=""; print}' "$cfg")"
