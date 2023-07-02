@@ -1,0 +1,21 @@
+name: cpc.trans8-fbank-80
+system_description: "transformer context net + 80-dim f-fbank"
+input_size: 80
+feat_type: fbank-80
+latent_type: ff
+context_type: csa
+csa:
+  max_width: 8
+  dim_feedforward: 1024
+training:
+  num_devices:
+  data:
+    common:
+      batch_size: 12
+      drop_last: true
+  cpc_loss:
+    prediction_type: ff
+    offset: 7
+  chunking:
+    max_chunks: 64
+    lobe_size: 127
