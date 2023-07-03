@@ -65,7 +65,8 @@ fi
 if [ ! -f "$dlf/.${tr}_complete" ]; then
     echo "Computing $ft features of librispeech"
     $cmd_p python prep/librispeech.py \
-        "$dl" torch_dir char $ft ${FT2TD_ARGS[$ft]} ${TR2TD_ARGS[$tr]}
+        "$dl" torch_dir \
+            char $ft ${FT2TD_ARGS[$ft]} ${TR2TD_ARGS[$tr]} --skip-verify
     touch "$dlf/.${tr}_complete"
     ((only)) && exit 0
 fi
@@ -156,7 +157,7 @@ if [ ! -f "$dlf/${tdir}_train_subset/.complete" ]; then
     rm -rf "$dlf/${tdir}_train_subset"
     mkdir -p "$dlf/${tdir}_train_subset"
     find "$dlf/$tdir/feat" -name '*.pt' -exec basename {} \; | \
-        cut -d '.' -f 1 | \
+        cut -d '.' -f 1 | sort | \
         join -v1 - <(sort resources/train_clean_100_test_subset.txt) \
             > "$dlf/${tdir}_train_subset/uttids"
     $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
@@ -168,14 +169,14 @@ if [ ! -f "$dlf/${tdir}_train_subset/.complete" ]; then
     ((only)) && exit 0
 fi
 
-if [ ! -f "$dlf/${tdir}_test_subset/.complete" ]; then
-    echo "Making test subset of $tdir"
-    rm -rf "$dlf/${tdir}_test_subset"
+if [ ! -f "$dlf/train_clean_100_test_subset/.complete" ]; then
+    echo "Making test subset of train_clean_100"
+    rm -rf "$dlf/train_clean_100_test_subset"
     $cmd_p subset-torch-spect-data-dir --num-workers=$nwork \
-        "$dlf/$tdir"{,_test_subset} \
+        "$dlf/train_clean_100"{,_test_subset} \
         --symlink \
         --utt-list-file resources/train_clean_100_test_subset.txt
-    touch "$dlf/${tdir}_test_subset/.complete"
+    touch "$dlf/train_clean_100_test_subset/.complete"
     ((only)) && exit 0
 fi
 
@@ -184,7 +185,7 @@ if [ ! -f "$ckpt" ]; then
     $cmd scpc-train \
             --read-model-yaml "$em/model.yaml" \
             "$dlf/${tdir}_train_subset" \
-            "$dlf/${tdir}_test_subset" \
+            "$dlf/train_clean_100_test_subset" \
             --root-dir "$exp" \
             "--version=$ver" "--num-workers=$nwork" $xtra_args
     [ -f "$ckpt" ] || exit 1

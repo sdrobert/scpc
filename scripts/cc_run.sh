@@ -1,10 +1,10 @@
 #! /usr/bin/env bash
-#SBATCH --time=3:00:00
-#SBATCH --cpus-per-task=4
+#SBATCH --time=4:00:00
+#SBATCH --cpus-per-task=16
 #SBATCH --ntasks-per-node=1
 #SBATCH --nodes=1
-#SBATCH --mem-per-cpu=4G
-#SBATCH --array=1-30%1
+#SBATCH --mem-per-cpu=1G
+#SBATCH --array=1-40%1
 #SBATCH --output=exp/slurm_logs/slurm-%A.out
 #SBATCH --open-mode=append
 
