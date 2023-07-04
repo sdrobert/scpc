@@ -47,8 +47,8 @@ ckpt_final="$bl/final.pt"
 # experiment
 dlf="$em/reps"
 
-WIDTHS=( 1 2 4 )
-BETAS=( 0 1 2 )
+WIDTHS=( 1 4 16 64 )
+BETAS=( 0 1 )
 
 ckpt_pre="$em/best.ckpt"
 if [ ! -f "$ckpt_pre" ]; then
@@ -58,7 +58,7 @@ fi
 
 # why the 960hr set if we're only training on clean 100? To ensure we have
 # access to the transcripts of all partitions for LM training
-if [ -z "$libri" ] && [ ! -f "$dl/.960_complete2" ]; then
+if [ -z "$libri" ] && [ ! -f "$dl/.bl_comlete" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.960_complete" ]; then
         echo "Downloading librispeech"
@@ -70,14 +70,14 @@ fi
 
 # in ./run.sh we don't generate an LM. Using a new file flag ensures we do.
 # Adding the LM shouldn't mess up anything upsteam.
-if [ ! -f "$dl/.960_complete2" ]; then
+if [ ! -f "$dl/.bl_complete" ]; then
     echo "Performing common prep of librispeech"
     $cmd_p python prep/librispeech.py "$dl" preamble \
         --speakers-are-readers "$libri"
     $cmd_p python prep/librispeech.py "$dl" init_char "$libri" \
         --custom-lm-max-order 10 \
         --custom-lm-prune-counts 0 0 0 0 0 1 1 1 2 3
-    touch "$dl/.960_complete2"
+    touch "$dl/.bl_complete"
     ((only)) && exit 0
 fi
 
@@ -146,7 +146,7 @@ if [ ! -f "$ckpt_2kshort" ]; then
             --read-training-yaml "$bl/2kshort-training.yaml" \
             --state-dir "$state_dir" \
             --state-csv "$bl/2kshort-training.csv" \
-            $xtra_args "$dlf/"{train_2kshort,train_2kshort} "$ckpt_2kshort"
+            $xtra_args "$dlf/"{train_2kshort,dev_clean} "$ckpt_2kshort"
     rm -rf "$state_dir"
     ((only)) && exit 0
 fi

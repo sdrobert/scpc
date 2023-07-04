@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+# WARNING! This script is intended for use in the Jupyter notebook
+# scripts/analyze.ipynb. As such, it expects the run directory to be scripts/.
+
 import csv
 
 from pathlib import Path
@@ -20,6 +24,7 @@ from typing import Any, Iterable, Dict, Literal, Sequence, TypeVar, overload
 import pandas as pd
 
 from ruamel.yaml import YAML
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from pydrobert.param.serialization import register_serializer
 
 from scpc.train import LightningPretrainedFrontendParams as Params
@@ -43,22 +48,25 @@ register_serializer("reckless_json")
 
 
 def collate_data(
+    results_from: Literal["zrc", "tb"] = "zrc",
     exp_dir: str = "../exp",
     model_blacklist: Sequence[str] = MODEL_BLACKLIST,
-    results_from: Literal["zrc"] = "zrc",
     collapse_distributed: bool = True,
 ):
     """Combine experiment parameters and results"""
     yaml = YAML(typ="safe", pure=True)
 
     model_data, res_data = [], []
-    for id, pth in enumerate(Path(exp_dir).glob("**/**/model.yaml")):
-        model = pth.parts[-3]
+    exp_dir: Path = Path(exp_dir)
+    for id, pth in enumerate(exp_dir.glob("**/**/model.yaml")):
+        model, version = pth.parts[-3:-1]
         if model in model_blacklist:
             continue
 
         datum = yaml.load(pth)
         datum["id"] = id
+        # clobbers useless 'name' field
+        datum["name"] = f"{model}/{version}"
         model_data.append(datum)
 
         if results_from == "zrc":
@@ -74,6 +82,20 @@ def collate_data(
                         row["score"] = float(row["score"])
                         datum = dict(id=id, zrc=row)
                         res_data.append(datum)
+        elif results_from == "tb":
+            for event_path in exp_dir.glob(f'tb_logs/{datum["name"]}/events.*'):
+                ea = EventAccumulator(str(event_path))
+                ea.Reload()
+                if ({"epoch", "val_loss"} - set(ea.Tags()["scalars"])) != set():
+                    continue
+                for epoch, val_loss in zip(ea.Scalars("epoch"), ea.Scalars("val_loss")):
+                    assert epoch.step == val_loss.step
+                    datum = dict(id=id, tb=dict(
+                        step=int(epoch.step),
+                        epoch=int(epoch.value),
+                        val_loss=val_loss.value
+                    ))
+                    res_data.append(datum)
         else:
             raise NotImplementedError
 
@@ -83,7 +105,6 @@ def collate_data(
     df = df.drop(
         list(df.filter(regex=r"\.name$").columns)
         + [
-            "name",
             "system_description",
             "training.accelerator",
             "training.cpc_loss.speaker_regex",
@@ -150,9 +171,6 @@ def collate_data(
 
     df = df.dropna(axis=1, how="all")  # remove columns which are all NA
 
-    # make all integer entries floating point
-    # df = df.astype(dict((x, float) for x in df.columns if df[x].dtype.char == "l"))
-
     # make all string-based entries categorical
     df = df.astype(dict((x, "category") for x in df.columns if df[x].dtype.char == "O"))
 
@@ -171,8 +189,9 @@ def check_data(df: pd.DataFrame, *cols: str) -> None:
             raise ValueError(f"col '{col}' from var contains N/A value(s)")
 
     # now check that the only remaining variable columns can be found in cols
+    # (except "name", which is probably varying with the values in cols)
     for col in df.columns:
-        if col in cols:
+        if col in cols or col == "name":
             continue
         unique_vals = df[col].unique()
         if len(unique_vals) > 1:
