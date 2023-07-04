@@ -86,6 +86,8 @@ mkdir -p /scpc-artifacts/{data,exp}
 ln -s "$(cd /scpc-artifacts/data; pwd -P)"
 ln -s "$(cd /scpc-artifacts/exp; pwd -P)"
 
+exit 0  # debug
+
 echo "Activating and updating python environment"
 source scripts/aws_env.sh
 
