@@ -1,7 +1,7 @@
 #! /usr/bin/env
 
 source activate pytorch
-conda update --name pytorch -f environment.yaml
+conda env update -n pytorch -f environment.yaml -v
 # conda activate pytorch
 # conda install tensorboard pytorch-lightning=1.
 # conda install -c coml virtual-dataset zerospeech-benchmarks zerospeech-libriabx2 zerospeech-tde

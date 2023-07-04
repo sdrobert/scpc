@@ -20,13 +20,13 @@
             "UserData": "${user_data}",
             "InstanceRequirements": {
                 "VCpuCount": {
-                    "Min": 8
+                    "Min": ${ncpu}
                 },
                 "MemoryMiB": {
-                    "Min": 16000
+                    "Min": ${nmib}
                 },
                 "AcceleratorCount": {
-                    "Min": 4
+                    "Min": ${ngpu}
                 },
                 "AcceleratorManufacturers": [
                     "nvidia"

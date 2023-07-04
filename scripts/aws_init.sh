@@ -64,9 +64,3 @@ aws iam create-role \
 aws iam attach-role-policy \
      --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole \
      --role-name "$FLEET_ROLE_NAME"
-
-# run a cpu step
-aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-cpu-spot-fleet-config.json -o)"
-
-# run a 4-gpu step
-aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-4gpu-spot-fleet-config.json -o)"

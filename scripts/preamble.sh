@@ -6,7 +6,7 @@ source scripts/utils.sh
 
 usage () {
     local ret="${1:-1}"
-    IFS="," echo -e "Usage: $0 [-${HLP_FLG}|-${OLY_FLG}|-${SRN_FLG}] [-$DAT_FLG DIR]" \
+    IFS="," echo -e "Usage: $0 [-${HLP_FLG}][-${OLY_FLG}][-${SRN_FLG}] [-$DAT_FLG DIR]" \
         "[-$EXP_FLG DIR] [-$VER_FLG I] [-$PRC_FLG N]"\
         "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"\
         "[-$PCA_FLG {${!PCAS[*]}}]"\
