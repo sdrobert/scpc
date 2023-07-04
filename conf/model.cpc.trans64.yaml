@@ -7,13 +7,13 @@ csa:
   max_width: 64
   dim_feedforward: 1024
 training:
-  num_devices: 4
+  num_devices:
   data:
     common:
-      batch_size: 3
+      batch_size: 12
       drop_last: true
   cpc_loss:
     prediction_type: csa
     offset: 63
   chunking:
-    max_chunks: 16
+    max_chunks: 64
