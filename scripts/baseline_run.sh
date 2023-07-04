@@ -58,7 +58,7 @@ fi
 
 # why the 960hr set if we're only training on clean 100? To ensure we have
 # access to the transcripts of all partitions for LM training
-if [ -z "$libri" ] && [ ! -f "$dl/.bl_comlete" ]; then
+if [ -z "$libri" ] && [ ! -f "$dl/.960_complete" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.960_complete" ]; then
         echo "Downloading librispeech"
