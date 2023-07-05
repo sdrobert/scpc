@@ -1,0 +1,32 @@
+{
+  "Overrides": {
+    "SecurityGroups": [
+        {
+            "GroupId": "${SECURITY_GROUP_ID}"
+        }
+    ],
+    "IamInstanceProfile": {
+        "Arn": "arn:aws:iam::${AWS_ACCOUNT_ID}:instance-profile/${ROLE_NAME}"
+    },
+    "KeyName": "${KEY_NAME}",
+    "ImageId": "${IMAGE_ID}",
+    "Placement": {
+        "AvailabilityZone": "${AWS_ZONES}"
+    },
+    "UserData": "${user_data}",
+    "InstanceRequirements": {
+        "VCpuCount": {
+            "Min": ${ncpu}
+        },
+        "MemoryMiB": {
+            "Min": ${nmib}
+        },
+        "AcceleratorCount": {
+            "Min": ${ngpu}
+        },
+        "AcceleratorManufacturers": [
+            "nvidia"
+        ]
+    }
+  }
+}
