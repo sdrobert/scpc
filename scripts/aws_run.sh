@@ -106,7 +106,7 @@ VOLUME_TAG="${VOLUME_TAG:-scpc-artifacts}"
 SNAPSHOT_TAG="${SNAPSHOT_TAG:-scpc-snapshots}"
 
 # variables
-ncpu=8
+ncpu=4
 ngpu=0
 nmib=16000
 run_sh="./run.sh"
