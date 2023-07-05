@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# Copyright 2023 Sean Robertson
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# WARNING! This script is called on the start up of a spot-fleet instance.
+# Do not try to call it directly.
+
 echo "Beginning run in $(pwd -P)"
 
 if ! aws help > /dev/null; then
@@ -86,10 +103,13 @@ mkdir -p /scpc-artifacts/{data,exp}
 ln -s "$(cd /scpc-artifacts/data; pwd -P)"
 ln -s "$(cd /scpc-artifacts/exp; pwd -P)"
 
-exit 0  # debug
-
 echo "Activating and updating python environment"
-source scripts/aws_env.sh
+source activate pytorch
+conda install tensorboard
+conda install -c coml virtual-dataset zerospeech-benchmarks zerospeech-libriabx2 zerospeech-tde
+conda install -c sdrobert pydrobert-kaldi pydrobert-param
+pip install "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc" "git+https://github.com/sdrobert/pydrobert-speech"
+pip install '.[all]'
 
 # run tensorboard as a background server
 echo "Starting tensorboard in the background"

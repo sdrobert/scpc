@@ -25,9 +25,10 @@ source scripts/utils.sh
 usage () {
     local ret="${1:-1}"
     IFS="," echo -e "Usage: $0 [-${HLP_FLG}] [-${CPU_FLG} N] [-${GPU_FLG} NN] [-${MEM_FLG} N]" \
-      "[-${CNF_FLG} PTH] [-${RUN_FLG} PTH] [-${URL_FLG} URL]"
+      "[-${CNF_FLG} PTH] [-${RUN_FLG} PTH] [-${URL_FLG} URL] [-- RUN_ARGS]"
     if ((ret == 0)); then
         cat << EOF 1>&2
+E.g.: $0 -G 1 -- -m cpc.small -v 1
 
 Compatiblility layer for issuing AWS spot fleet requests. 
 
@@ -119,6 +120,7 @@ while getopts "${HLP_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${CNF_FLG}:${RUN_FLG}:
       repo="$OPTARG"
       ;;
     *)
+      usage
       ;;
   esac
 done
@@ -155,7 +157,6 @@ if [ -z "$IMAGE_ID" ]; then
   fi
 fi
 
-echo "The remaining arguments '$*' will be passed to $run_sh"
 
 user_data="$(
   awk -v args="$(printf " '%s' " "$@")" \
@@ -170,13 +171,19 @@ user_data="$(
       gsub("<GIT_REPO>", repo);
       gsub("<RUN_SH>", run_sh);
       print}' \
-    scripts/aws_run_internal.sh | \
+    scripts/aws_run_internal.template.sh | \
     base64 -w0
   )"
 
-
-export SECURITY_GROUP_ID KEY_NAME AWS_REGION IMAGE_ID AWS_ZONES SNAPSHOT_TAG
-export ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME VOLUME_TAG
+for name in SECURITY_GROUP_ID KEY_NAME AWS_REGION IMAGE_ID AWS_ZONES \
+          SNAPSHOT_TAG ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME VOLUME_TAG; do
+  if [ -z "${!name}" ]; then
+    echo "Environment variable '$name' was not set and could not be determined"
+    exit 1
+  fi
+  export "$name"
+done
 export user_data ncpu ngpu nmib
-cat "$cnf" | envsubst
-# aws ec2 request-spot-fleet --spot-fleet-request-config "$(build_private_version conf/aws-4gpu-spot-fleet-config.json -o)"
+
+echo "The remaining arguments '$*' will be passed to $run_sh"
+aws ec2 request-spot-fleet --spot-fleet-request-config "$(cat "$cnf" | envsubst)"
