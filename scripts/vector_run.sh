@@ -4,6 +4,7 @@
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=16
 #SBATCH --output=exp/slurm_logs/%j.out
+#SBATCH --exclude=gpu081,gpu090
 
 set -e
 
