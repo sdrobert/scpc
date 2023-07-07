@@ -173,7 +173,9 @@ class BestRqLossParams(param.Parameterized):
         8192, bounds=(1, None), doc="Number of quantized vectors in codebook"
     )
     codebook_dim: int = param.Integer(
-        16, bounds=(1, None), doc="Size of quantized vector in codebook",
+        16,
+        bounds=(1, None),
+        doc="Size of quantized vector in codebook",
     )
     num_speakers: Optional[int] = param.Integer(
         None,
@@ -777,7 +779,9 @@ class LightningPretrainedFrontend(pl.LightningModule):
         return feats, None, None, feat_sizes, None, utt_ids
 
     def forward(
-        self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor] = None,
+        self,
+        feats: torch.Tensor,
+        feat_lens: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         return self.get_inference_model().forward(feats, feat_lens)
 
@@ -812,7 +816,11 @@ class LightningPretrainedFrontend(pl.LightningModule):
             )
 
         grp = pargparse.add_deserialization_group_to_parser(
-            parser, params, "params", reckless=True, flag_format_str=read_format_str,
+            parser,
+            params,
+            "params",
+            reckless=True,
+            flag_format_str=read_format_str,
         )
         return grp
 
@@ -853,7 +861,7 @@ def main(args: Optional[Sequence[str]] = None):
         "--num-workers", type=int, default=None, help="Number of workers in datasets"
     )
     parser.add_argument(
-        "--no-progress-bar",
+        "--quiet",
         action="store_true",
         default=False,
         help="Suppress progress bar",
@@ -909,7 +917,7 @@ def main(args: Optional[Sequence[str]] = None):
     os.makedirs(model_dir, exist_ok=True)
     cc = ModelCheckpoint(model_dir, save_last=True)
     callbacks = [cc]
-    enable_progress_bar = not options.no_progress_bar
+    enable_progress_bar = not options.quiet
     if enable_progress_bar:
         callbacks.append(RichProgressBar())
     logger_dir = os.path.join(root_dir, "tb_logs")

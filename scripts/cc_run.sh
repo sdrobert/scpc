@@ -20,7 +20,13 @@ source scripts/cc_env.sh
 P="${SLURM_TASKS_PER_NODE:-1}"
 W="${SLURM_CPUS_PER_TASK:-4}"
 
-./run.sh "$@" -s -p "$P" -w "$W" -x "--no-progress-bar"
+script="./run.sh"
+if [ -f "$1" ]; then
+  script="$1"
+  shift
+fi
+
+"$script" -s -p "$P" -w "$W" -x "--quiet" "$@"
 r=$?
 sleep 5
 scancel --state=PENDING "${SLURM_ARRAY_JOB_ID}"
