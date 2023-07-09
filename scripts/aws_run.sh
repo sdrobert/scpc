@@ -190,7 +190,7 @@ user_data="$(
     -v snap_tag="${SNAPSHOT_TAG}" \
     -v repo="${repo}" \
     -v run_sh="${run_sh}" \
-    -v dirty="$dirty" \
+    -v dirty="${is_dirty}" \
     '{
       gsub("<RUN_ARGS>", args);
       gsub("<VOLUME_TAG>", vol_tag);
