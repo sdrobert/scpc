@@ -63,6 +63,7 @@ if [ ! -f "$zs/meta.yaml" ]; then
     rm "$zs/meta.yaml"
     (
         export fsize="$(scpc-info $expert_args "$ckpt" | awk '$1 == "downsampling_factor" {print $2 / 16000}')"
+        export cuda_avail="$(python -c 'import torch; print("true" if torch.cuda.is_available() else "false")')"
         cat conf/zrc.params.template.yaml | envsubst > "$zs/params.yaml"
     )
     (
