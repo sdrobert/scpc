@@ -253,9 +253,6 @@ train_description="${TR2DESC[$tr]}"
 
 system_description="$(awk -v s="$DEFT_SYS" '$1 == "system_description:" {$1=""; print}' "$cfg")"
 
-echo "system description: $system_description ($model)"
-echo "training set: $train_description ($tr)"
-
 a="$(mktemp)"
 echo "${FT2TD_ARGS[$ft]}" | tr ' ' '\n' > "$a"
 if [ ! -f "$em/expert.args.full.txt" ]; then
@@ -282,3 +279,7 @@ fi
 expert_args="$(cat "$expert_config")"
 
 darg="${STASK2DARG[$stask]}"
+
+echo "cmd: $0 $*"
+echo "system description: $system_description ($model)"
+echo "training set: $train_description ($tr)"
