@@ -137,5 +137,5 @@ mkdir -p exp/tb_logs
 tensorboard --logdir=exp/tb_logs &
 
 echo "Running with args ${RUN_ARGS[*]}"
-<RUN_SH> "${RUN_ARGS[@]}" -x "--no-progress-bar"
+<RUN_SH> "${RUN_ARGS[@]}" -x "--quiet"
 do_cleanup
