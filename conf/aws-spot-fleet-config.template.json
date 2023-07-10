@@ -8,7 +8,7 @@
         {
             "SecurityGroups": [
                 {
-                    "GroupId": "${SECURITY_GROUP_ID}"
+                    "GroupId": "${EC2_SG_ID}"
                 }
             ],
             "IamInstanceProfile": {
@@ -19,6 +19,7 @@
             "Placement": {
                 "AvailabilityZone": "${AWS_ZONES}"
             },
+            "SubnetId": "${SUBNET_IDS}",
             "UserData": "${user_data}",
             "InstanceRequirements": {
                 "VCpuCount": {

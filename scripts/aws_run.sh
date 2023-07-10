@@ -24,8 +24,8 @@ source scripts/utils.sh
 
 usage () {
     local ret="${1:-1}"
-    IFS="," echo -e "Usage: $0 [-${HLP_FLG}] [-${LEF_FLG}] [-${DTY_FLG}]" \
-      "[-${CPU_FLG} N] [-${GPU_FLG} NN] [-${MEM_FLG} N]" \
+    IFS="," echo -e "Usage: $0 [-${HLP_FLG}] [-${DTY_FLG}]" \
+      "[-${PNT_FLG}] [-${CPU_FLG} N] [-${GPU_FLG} NN] [-${MEM_FLG} N]" \
       "[-${RUN_FLG} PTH] [-${URL_FLG} URL] [-- RUN_ARGS]"
     if ((ret == 0)); then
         cat << EOF 1>&2
@@ -35,7 +35,8 @@ Compatiblility layer for issuing AWS spot fleet requests.
 
 Options
  -$HLP_FLG      Display this message and exit
- -$LEF_FLG      Run as a leaf (see below)
+ -$PNT_FLG      Print the spot fleet request to stdout and exit (WARNING: will
+         display potentially sensitive information)
  -$DTY_FLG      If set, will not terminate the spot fleet request nor the
          instance after running.
  -$CPU_FLG      Request (at least) this many CPUs in the instance (deft: $ncpu)
@@ -56,29 +57,14 @@ but is potentially sensitive.
   KEY_NAME ${KEY_NAME:+(${KEY_NAME})}
   POLICY_NAME ${POLICY_NAME:+(${POLICY_NAME})}
   ROLE_NAME ${ROLE_NAME:+($ROLE_NAME)}
-  SECURITY_GROUP_ID ${SECURITY_GROUP_ID:+(XXX)}
-  SNAPSHOT_TAG ${SNAPSHOT_TAG:+(${SNAPSHOT_TAG})}
-  VOLUME_TAG ${VOLUME_TAG:+(${VOLUME_TAG})}
+  EC2_SG_ID ${EC2_SG_ID:+(XXX)}
+  SUBNET_IDS ${SUBNET_IDS:+(XXX)}
+  EFS_NAME ${EFS_NAME:+(${EFS_NAME})}
 
-ROLE_NAME, FLEET_ROLE_NAME, POLICY_NAME, VOLUME_TAG, and SNAPSHOT_TAG should
-all have default values. AWS_ZONES, AWS_ACCOUNT_ID, and IMAGE_ID may be
-inferred later with aws commands (assuming appropriate privileges).
-
-Leaf mode:
-
-By default, the spot fleet will attach to the "ground truth" EBS volume,
-replicating it to the instance's availability and destroying the previous
-version when necessary. This ensures only one version of artifacts will be
-valid at a given time. However, this method cannot be parallelized. By
-enabling leaf mode with the flag -${LEF_FLG}, ground truth will be copied to
-the instance's local EBS volume without mounting it. The local EBS volume
-will not be destroyed whe the spot fleet request is terminated. While the
-new volume will be available on AWS, it is no longer part of the run pipeline
--- hence, a "leaf." It is recommended that all data preparation steps be
-completed on the ground truth EBS so that no work is duplicated.
-
-If the environment variable SNAPSHOT_ID has been set ${SNAPSHOT_ID:+(yes)}, this snapshot id
-will be copied into the local volume instead of creating a new one.
+ROLE_NAME, FLEET_ROLE_NAME, POLICY_NAME, EFS_NAME, and SNAPSHOT_TAG should all
+have default values. AWS_ZONES, AWS_ACCOUNT_ID, EC2_SG_ID, SUBNET_IDS, and
+IMAGE_ID may be inferred later with aws commands (assuming appropriate
+privileges).
 
 EOF
     fi
@@ -87,23 +73,20 @@ EOF
 
 # constants
 HLP_FLG=h
-LEF_FLG=L
+PNT_FLG=P
 DTY_FLG=D
 CPU_FLG=C
 GPU_FLG=G
 MEM_FLG=M
 RUN_FLG=R
 URL_FLG=U
-DEFT_EBS_VOL_SIZE=32  # The volume size used for booting when the ground-true
-DEFT_CONF_TEMPLATE=conf/aws-spot-fleet-config.template.json
-LEAF_CONF_TEMPLATE=conf/aws-spot-fleet-config-leaf.template.json
 
 # env vars with defaults
 ROLE_NAME="${ROLE_NAME:-scpc-run}"
 FLEET_ROLE_NAME="${FLEET_ROLE_NAME:-aws-ec2-spot-fleet-tagging-role}"
 POLICY_NAME="${POLICY_NAME:-scpc-run-policy}"
-VOLUME_TAG="${VOLUME_TAG:-scpc-artifacts}"
-SNAPSHOT_TAG="${SNAPSHOT_TAG:-scpc-snapshots}"
+EFS_NAME="${EFS_NAME:-scpc-artifacts}"
+EC2_SG_NAME="${EC2_SG_NAME:-scpc-ec2-sg}"
 
 # variables
 ncpu=4
@@ -111,18 +94,19 @@ ngpu=0
 nmib=16000
 run_sh="./run.sh"
 repo="https://github.com/sdrobert/scpc.git"
-is_leaf=false
 is_dirty=false
+is_print=false
+cnf=conf/aws-spot-fleet-config.template.json
 
 set -e
 
-while getopts "${HLP_FLG}${LEF_FLG}${DTY_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${RUN_FLG}:${URL_FLG}:" opt; do
+while getopts "${HLP_FLG}${PNT_FLG}${DTY_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${RUN_FLG}:${URL_FLG}:" opt; do
   case $opt in
     ${HLP_FLG})
       usage 0
       ;;
-    ${LEF_FLG})
-      is_leaf=true
+    ${PNT_FLG})
+      is_print=true
       ;;
     ${DTY_FLG})
       is_dirty=true
@@ -182,26 +166,40 @@ if [ -z "$IMAGE_ID" ]; then
     exit 1
   fi
 fi
+if [ -z "$EC2_SG_ID" ]; then
+  echo "EC2_SG_ID is empty. Trying to infer EC2_SG_ID from 'aws ec2 describe-security-groups'"
+  EC2_SG_ID=$(aws ec2 describe-security-groups --group-names $EC2_SG_NAME --query 'SecurityGroups[].GroupId' --output text)
+  if [ -z "$EC2_SG_ID" ]; then
+    echo "Failed to infer EC2_SG_ID!"
+    exit 1
+  fi
+fi
+if [ -z "$SUBNET_IDS" ]; then
+  echo "SUBNET_IDS is empty. Trying to infer SUBNET_IDS from default vpc and 'aws ec2 describe-subnets'"
+  VPC_ID="${VPC_ID:-$(aws ec2 describe-vpcs --filters 'Name=is-default,Values=true' --query 'Vpcs[].VpcId' --output text)}"
+  SUBNET_IDS="$(aws ec2 describe-subnets --region $AWS_REGION --filters "Name=vpc-id,Values=${VPC_ID}" "Name=default-for-az,Values=true" --query 'Subnets[].SubnetId' --output text | tr $'\t' ',')"
+  if [ -z "$SUBNET_IDS" ]; then
+    echo "Failed to infer SUBNET_IDS!"
+    exit 1
+  fi
+fi
 
-
-user_data="$(
+user_data_raw="$(
   awk -v args="$(printf " '%s' " "$@")" \
-    -v vol_tag="${VOLUME_TAG}" \
-    -v snap_tag="${SNAPSHOT_TAG}" \
     -v repo="${repo}" \
     -v run_sh="${run_sh}" \
     -v dirty="${is_dirty}" \
+    -v efs="${EFS_NAME}" \
     '{
       gsub("<RUN_ARGS>", args);
-      gsub("<VOLUME_TAG>", vol_tag);
-      gsub("<SNAPSHOT_TAG>", snap_tag);
       gsub("<GIT_REPO>", repo);
       gsub("<RUN_SH>", run_sh);
       gsub("<DIRTY>", dirty);
+      gsub("<EFS_NAME>", efs);
       print}' \
-    scripts/aws_run_internal.template.sh | \
-    base64 -w0
+    scripts/aws_run_internal.template.sh
   )"
+user_data="$(echo "$user_data_raw" | base64 -w0)"
 
 echo "The remaining arguments '$*' will be passed to $run_sh"
 
@@ -211,33 +209,9 @@ else
   acc_man=
 fi
 
-if $is_leaf; then
-  echo "Will make a leaf"
-  cnf="${LEAF_CONF_TEMPLATE}"
-  if [ -z "$SNAPSHOT_ID" ]; then
-    echo "SNAPSHOT_ID is not set. Creating a snapshot. First, determine volume"
-    volume_id="$(aws ec2 describe-volumes --region "$AWS_REGION" --filter "Name=tag:Name,Values=${VOLUME_TAG}" --query "Volumes[].VolumeId" --output text || true)"
-    if [ -z "$volume_id" ]; then
-      echo "Could not determine volume"
-      exit 1
-    fi
-    echo "Creating snapshot"
-    SNAPSHOT_ID="$(aws ec2 create-snapshot --region "$AWS_REGION" --volume-id "$volume_id" --description "`date +"%D %T"`" --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${SNAPSHOT_TAG}}]" --query SnapshotId --output text || true)"
-    if [ -z "$SNAPSHOT_ID" ]; then
-      echo "Could not create snapshot"
-      exit 1
-    fi
-  fi
-  echo "Waiting for snapshot to complete"
-  aws ec2 wait snapshot-completed --region "$AWS_REGION" --snapshot-ids "$SNAPSHOT_ID"
-else
-  echo "Will attach ground truth to the instance"
-  cnf="${DEFT_CONF_TEMPLATE}"
-fi
-
 # export
-for name in SECURITY_GROUP_ID KEY_NAME AWS_REGION IMAGE_ID AWS_ZONES \
-          SNAPSHOT_TAG ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME VOLUME_TAG; do
+for name in EC2_SG_ID SUBNET_IDS EFS_NAME KEY_NAME AWS_REGION IMAGE_ID \
+            ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME; do
   if [ -z "${!name}" ]; then
     echo "Environment variable '$name' was not set and could not be determined"
     exit 1
@@ -246,5 +220,19 @@ for name in SECURITY_GROUP_ID KEY_NAME AWS_REGION IMAGE_ID AWS_ZONES \
 done
 export user_data ncpu ngpu nmib SNAPSHOT_ID ebs_volume_size delete_ebs acc_man
 
-echo "Requesting spot fleet instance"
-aws ec2 request-spot-fleet --spot-fleet-request-config "$(cat "$cnf" | envsubst)"
+request_config="$(cat "$cnf" | envsubst)"
+
+if $is_print; then
+  echo "-------------------------------------------"
+  echo "The request config:"
+  echo "-------------------------------------------"
+  echo "$request_config" 
+  echo
+  echo "-------------------------------------------"
+  echo "The user data:"
+  echo "-------------------------------------------"
+  echo "$user_data_raw"
+else
+  echo "Requesting spot fleet instance"
+  aws ec2 request-spot-fleet --spot-fleet-request-config "$request_config"
+fi

@@ -2,19 +2,19 @@
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "VisualEditor0",
             "Effect": "Allow",
             "Action": [
                 "ec2:AttachVolume",
                 "ec2:DeleteVolume",
+                "ec2:DescribeVolumeStatus",
                 "ec2:CancelSpotFleetRequests",
                 "ec2:CreateTags",
-                "ec2:CreateSnapshot",
-                "ec2:CreateVolume",
-                "ec2:DescribeVolumeStatus",
                 "ec2:DescribeVolumes",
+                "ec2:CreateSnapshot",
                 "ec2:DescribeSpotInstanceRequests",
-                "ec2:DescribeSnapshots"
+                "ec2:DescribeSnapshots",
+                "ec2:CreateVolume",
+                "elasticfilesystem:DescribeFileSystems"
             ],
             "Resource": "*"
         }
