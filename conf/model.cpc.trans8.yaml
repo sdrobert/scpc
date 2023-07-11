@@ -5,7 +5,8 @@ conv:
   output_size: 256
 csa:
   max_width: 8
-  dim_feedforward: 1024
+  num_layers: 2
+  dim_feedforward: 512
 training:
   num_devices:
   data:
@@ -14,6 +15,6 @@ training:
       drop_last: true
   cpc_loss:
     prediction_type: csa
-    offset: 7
+    offset: 14
   chunking:
     max_chunks: 64
