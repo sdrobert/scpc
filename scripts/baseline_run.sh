@@ -41,6 +41,8 @@ source scripts/preamble.sh
 dl="$data/librispeech"
 em="$exp/$model/version_$ver"
 bl="$em/baseline"
+blt="$bl/tuning"
+bld="$bl/decoding"
 ckpt_2kshort="$bl/2kshort.pt"
 ckpt_final="$bl/final.pt"
 # XXX(sdrobert): we save to experiment dir because reps are specific to the
@@ -179,7 +181,7 @@ fi
 rem=$nproc
 for width in "${WIDTHS[@]}"; do
     for beta in "${BETAS[@]}"; do
-        Tdir="$bl/tuning/${width}_${beta}"
+        Tdir="$blt/${width}_${beta}"
         if [ ! -f "$Tdir/.complete" ]; then
             mkdir -p "$Tdir"
             echo "Checking combination --beam-width $width --beta $beta"
@@ -218,7 +220,7 @@ done
 
 for width in "${WIDTHS[@]}"; do
     for beta in "${BETAS[@]}"; do
-        Tdir="$bl/tuning/${width}_${beta}"
+        Tdir="$blt/${width}_${beta}"
         if [ ! -f "$Tdir/score.txt" ]; then
             $cmd_p compute-torch-token-data-dir-error-rates \
                 --quiet \
@@ -236,7 +238,7 @@ if [ ! -f "$bl/lm-tuned.decode.args.txt" ]; then
     for beta in "${BETAS[@]}"; do
         [ $beta -eq 0 ] && continue
         for width in "${WIDTHS[@]}"; do
-            Tdir="$bl/tuning/${width}_${beta}"
+            Tdir="$blt/${width}_${beta}"
             er=$(cat "$Tdir/score.txt")
             if (( $(echo "$er < $best_er" | bc -l) )); then
                 best_er=$er
@@ -252,7 +254,7 @@ if [ ! -f "$bl/nolm-tuned.decode.args.txt" ]; then
     best_er=1000
     best_args=DEADBEEF
     for width in "${WIDTHS[@]}"; do
-        Tdir="$bl/tuning/${width}_0"
+        Tdir="$blt/${width}_0"
         er=$(cat "$Tdir/score.txt")
         if (( $(echo "$er < $best_er" | bc -l) )); then
             best_er=$er
@@ -267,7 +269,7 @@ rem=$nproc
 for x in dev_clean dev_other test_clean test_other; do
     src="$dlf/$x"
     for y in lm nolm; do
-        dst="$bl/decode/$x/$y"
+        dst="$bld/$x/$y"
         if [ ! -f "$dst/.complete" ]; then
             mkdir -p "$dst"
             echo "Decoding $x with $y"
@@ -296,4 +298,22 @@ for x in dev_clean dev_other test_clean test_other; do
             fi
         fi
     done
+done
+
+for x in dev_clean dev_other test_clean test_other; do
+    if [ ! -f "$bld/scores.$x.txt" ]; then
+        cp -f "$dlf/ext/$x.ref.trn" "$bld/$x.ref.chr.trn"
+        $cmd_p prep/subword2word.py "$bld/$x.ref."{chr,wrd}".trn"
+        for y in lm nolm; do
+            $cmd_p torch-token-data-dir-to-trn \
+                "$bld/$x/$y" "$dlf/ext/id2token.txt" "$bld/$x.hyp.chr.$y.trn"
+            $cmd_p prep/subword2word.py "$bld/$x.hyp."{chr,wrd}".$y.trn"
+        done
+        for y in chr wrd; do
+            prep/error-rates-from-trn.py --suppress-warning \
+                "$bld/$x.ref.$y.trn" "$bld/$x.ref.$y.{lm,nolm}.trn" \
+                > "$bld/scores.$x.$y.trn"
+        done
+        ((only)) && exit 0
+    fi
 done
