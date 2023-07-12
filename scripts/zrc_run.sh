@@ -85,7 +85,12 @@ if [ ! -f "$zs/scores/.complete" ]; then
     echo "Scoring abxLS zerospeech submissing using $model model"
     $cmd_p zrc benchmarks:run abxLS "$zs"
     touch "$zs/scores/.complete"
+    $clean && find "$zs/" -name '*.npy' -delete
     ((only)) && exit 0
+fi
+
+if $clean; then
+    find "$zs/" -name '*.npy' -delete
 fi
 
 cat "$zs/scores/score_all_phonetic.csv"

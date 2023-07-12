@@ -6,7 +6,8 @@ source scripts/utils.sh
 
 usage () {
     local ret="${1:-1}"
-    IFS="," echo -e "Usage: $0 [-${HLP_FLG}][-${OLY_FLG}][-${SRN_FLG}] [-$DAT_FLG DIR]" \
+    IFS="," echo -e "Usage: $0 [-${HLP_FLG}] [-${OLY_FLG}] [-${SRN_FLG}]" \
+        "[-$CLN_FLG] [-$DAT_FLG DIR]" \
         "[-$EXP_FLG DIR] [-$VER_FLG I] [-$PRC_FLG N]"\
         "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"\
         "[-$PCA_FLG {${!PCAS[*]}}]"\
@@ -21,6 +22,8 @@ Options
  -$OLY_FLG      Perform only one step and return
  -$SRN_FLG      Prefix work-heavy commands with "srun" (i.e. when running
             nested in an sbatch command)
+ -$CLN_FLG      If set, intermediary files will be deleted once they are no
+            longer necessary
  -$DAT_FLG      Root data directory (default: $data)
  -$EXP_FLG      Root experiment directory (defalt: $exp)
  -$MDL_FLG      Model to train/evaluate (default: $model)
@@ -54,6 +57,7 @@ LIB_FLG=l
 XTR_FLG=x
 PCA_FLG=P
 TSK_FLG=t
+CLN_FLG=z
 
 DEFT_FT=raw
 declare -A FTS=( [raw]=x [fbank]=x [fbank-80]=x [superb.fbank]=x )
@@ -136,8 +140,9 @@ pca=
 cmd=
 cmd_p=
 stask=pr
+clean=false
 
-while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:" opt; do
+while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:" opt; do
     case $opt in
         ${HLP_FLG})
             usage 0
@@ -148,6 +153,9 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${
         ${SRN_FLG})
             cmd="srun -- "
             cmd_p="srun --ntasks=1 -- "
+            ;;
+        ${CLN_FLG})
+            clean=true
             ;;
         ${DAT_FLG})
             argcheck_is_writable $opt "$OPTARG"

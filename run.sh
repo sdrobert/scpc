@@ -164,7 +164,7 @@ if [ ! -f "$dlf/${tdir}_train_subset/.complete" ]; then
         "$dlf/$tdir"{,_train_subset} \
         --symlink \
         --utt-list-file "$dlf/${tdir}_train_subset/uttids"
-    rm "$dlf/${tdir}_train_subset/uttids"
+    $clean && rm "$dlf/${tdir}_train_subset/uttids"
     touch "$dlf/${tdir}_train_subset/.complete"
     ((only)) && exit 0
 fi
@@ -189,8 +189,7 @@ if [ ! -f "$ckpt" ]; then
             --root-dir "$exp" \
             "--version=$ver" "--num-workers=$nwork" $xtra_args
     [ -f "$ckpt" ] || exit 1
-    echo "Deleting intermediate checkpoints of $model"
-    find "$em/" -name '*.ckpt' -not -name 'best.ckpt' -delete
+    $clean && find "$em/" -name '*.ckpt' -not -name 'best.ckpt' -delete
     ((only)) && exit 0
 fi
 
@@ -204,6 +203,10 @@ for pca in "${!PCAS[@]}"; do
         ((only)) && exit 0
     fi
 done
+
+if $clean; then
+    find "$em/" -name '*.ckpt' -not -name 'best.ckpt' -delete
+fi
 
 # # check the average number of 10ms frames in an utterance
 # unzip -cq resources/converted_aligned_phones.zip | \

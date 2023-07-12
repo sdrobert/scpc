@@ -149,7 +149,7 @@ if [ ! -f "$ckpt_2kshort" ]; then
             --state-dir "$state_dir" \
             --state-csv "$bl/2kshort-training.csv" \
             $xtra_args "$dlf/"{train_2kshort,dev_clean} "$ckpt_2kshort"
-    rm -rf "$state_dir"
+    $clean && rm -rf "$state_dir"
     ((only)) && exit 0
 fi
 
@@ -174,7 +174,7 @@ if [ ! -f "$ckpt_final" ]; then
             --state-dir "$state_dir" \
             --state-csv "$bl/training.csv" \
             $xtra_args "$dlf/"{train_clean_100,dev_clean} "$ckpt_final"
-    rm -rf "$state_dir"
+    $clean && rm -rf "$state_dir"
     ((only)) && exit 0
 fi
 
@@ -320,5 +320,10 @@ for x in dev_clean dev_other test_clean test_other; do
         ((only)) && exit 0
     fi
 done
+
+if $clean; then
+    rm -rf "$bl/states_"*
+    find "$dlf/" -name 'lbi-*-.pt' -delete
+fi
 
 cat "$bld/scores."{dev_clean,dev_other,test_clean,test_other}.txt
