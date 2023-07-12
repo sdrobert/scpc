@@ -2,8 +2,8 @@
     "TargetCapacity": 1,
     "AllocationStrategy": "lowestPrice",
     "IamFleetRole": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${FLEET_ROLE_NAME}",
-    "Type": "maintain",
-    "InstanceInterruptionBehavior": "stop",
+    "Type": "request",
+    "InstanceInterruptionBehavior": "terminate",
     "LaunchSpecifications": [
         {
             "SecurityGroups": [
@@ -19,6 +19,17 @@
             "Placement": {
                 "AvailabilityZone": "${AWS_ZONES}"
             },
+            "TagSpecifications": [
+                {
+                    "ResourceType": "instance",
+                    "Tags": [
+                        {
+                            "Key": "Name",
+                            "Value": "scpc: ${run_sh} ${args}"
+                        }
+                    ]
+                }
+            ],
             "SubnetId": "${SUBNET_IDS}",
             "UserData": "${user_data}",
             "InstanceRequirements": {
@@ -35,6 +46,17 @@
                     ${acc_man}
                 ]
             }
+        }
+    ],
+    "TagSpecifications": [
+        {
+            "ResourceType": "spot-fleet-request",
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value":"scpc: ${run_sh} ${args}"
+                },
+            ]
         }
     ]
 }

@@ -1,5 +1,5 @@
-name: bestrq.trans
-system_description: BEST-RQ + cpc.trans
+name: bestrq.trans4
+system_description: 'BEST-RQ + cpc.trans w/ 4-frame causal context'
 feat_type: fbank-80
 train_part: '100'
 input_size: 80
@@ -9,7 +9,7 @@ ff:
   output_size: 256
 csa:
   dim_feedforward: 1024
-  max_width: 128
+  max_width: 4
 training:
   data:
     common:

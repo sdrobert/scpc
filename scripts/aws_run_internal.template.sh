@@ -26,6 +26,7 @@ fi
 RUN_ARGS=( <RUN_ARGS> )
 IS_DIRTY=<DIRTY>
 EFS_NAME=<EFS_NAME>
+DO_TENSORBOARD=<DO_TENSORBOARD>
 
 INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id)"
 INSTANCE_AZ="$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)"
@@ -125,16 +126,17 @@ ln -s "$(cd /scpc-artifacts/exp; pwd -P)"
 
 echo "Activating and updating python environment"
 source activate pytorch
-conda install tensorboard
+$DO_TENSORBOARD && conda install tensorboard
 conda install -c coml virtual-dataset zerospeech-benchmarks zerospeech-libriabx2 zerospeech-tde
 conda install -c sdrobert pydrobert-kaldi pydrobert-param
 pip install "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc" "git+https://github.com/sdrobert/pydrobert-speech"
 pip install '.[all]'
 
-# run tensorboard as a background server
-echo "Starting tensorboard in the background"
-mkdir -p exp/tb_logs
-tensorboard --logdir=exp/tb_logs &
+if $DO_TENSORBOARD; then
+    echo "Starting tensorboard in the background"
+    mkdir -p exp/tb_logs
+    tensorboard --logdir=exp/tb_logs &
+fi
 
 echo "Running with args ${RUN_ARGS[*]}"
 <RUN_SH> -x "--quiet" "${RUN_ARGS[@]}"

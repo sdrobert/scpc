@@ -39,6 +39,7 @@ Options
          display potentially sensitive information)
  -$DTY_FLG      If set, will not terminate the spot fleet request nor the
          instance after running.
+ -$TSB_FLG      If set, start a tensorboard server on port 6006
  -$CPU_FLG      Request (at least) this many CPUs in the instance (deft: $ncpu)
  -$GPU_FLG      Request (at least) this many CPUs in the instance (deft: $ngpu)
  -$MEM_FLG      Request (at least) this many MiBs in the instance (deft: $nmib)
@@ -80,6 +81,7 @@ GPU_FLG=G
 MEM_FLG=M
 RUN_FLG=R
 URL_FLG=U
+TSB_FLG=T
 
 # env vars with defaults
 ROLE_NAME="${ROLE_NAME:-scpc-run}"
@@ -96,11 +98,12 @@ run_sh="./run.sh"
 repo="https://github.com/sdrobert/scpc.git"
 is_dirty=false
 is_print=false
+do_tensorboard=false
 cnf=conf/aws-spot-fleet-config.template.json
 
 set -e
 
-while getopts "${HLP_FLG}${PNT_FLG}${DTY_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${RUN_FLG}:${URL_FLG}:" opt; do
+while getopts "${HLP_FLG}${PNT_FLG}${DTY_FLG}${TSB_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${RUN_FLG}:${URL_FLG}:" opt; do
   case $opt in
     ${HLP_FLG})
       usage 0
@@ -110,6 +113,9 @@ while getopts "${HLP_FLG}${PNT_FLG}${DTY_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${
       ;;
     ${DTY_FLG})
       is_dirty=true
+      ;;
+    ${TSB_FLG})
+      do_tensorboard=true
       ;;
     ${CPU_FLG})
       argcheck_is_nat $opt $OPTARG
@@ -190,12 +196,14 @@ user_data_raw="$(
     -v run_sh="${run_sh}" \
     -v dirty="${is_dirty}" \
     -v efs="${EFS_NAME}" \
+    -v tb="${do_tensorboard}" \
     '{
       gsub("<RUN_ARGS>", args);
       gsub("<GIT_REPO>", repo);
       gsub("<RUN_SH>", run_sh);
       gsub("<DIRTY>", dirty);
       gsub("<EFS_NAME>", efs);
+      gsub("<DO_TENSORBOARD>", tb);
       print}' \
     scripts/aws_run_internal.template.sh
   )"
@@ -210,6 +218,7 @@ else
 fi
 
 # export
+args="$*"
 for name in EC2_SG_ID SUBNET_IDS EFS_NAME KEY_NAME AWS_REGION IMAGE_ID \
             ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME; do
   if [ -z "${!name}" ]; then
@@ -219,6 +228,7 @@ for name in EC2_SG_ID SUBNET_IDS EFS_NAME KEY_NAME AWS_REGION IMAGE_ID \
   export "$name"
 done
 export user_data ncpu ngpu nmib SNAPSHOT_ID ebs_volume_size delete_ebs acc_man
+export run_sh args
 
 request_config="$(cat "$cnf" | envsubst)"
 
