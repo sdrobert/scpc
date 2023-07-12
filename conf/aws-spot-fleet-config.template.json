@@ -55,7 +55,7 @@
                 {
                     "Key": "Name",
                     "Value":"scpc: ${run_sh} ${args}"
-                },
+                }
             ]
         }
     ]
