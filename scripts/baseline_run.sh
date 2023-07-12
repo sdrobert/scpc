@@ -142,9 +142,9 @@ if [ ! -f "$ckpt_2kshort" ]; then
     $cmd $train_script prep/asr_baseline.py \
         --read-model-yaml "$bl/model.yaml" \
         --mvn-path "$dlf/ext/mvn.pt" \
+        --num-workers $nwork \
+        --read-data-yaml "$bl/data.yaml" \
         train \
-            --num-workers $nwork \
-            --read-data-yaml "$bl/data.yaml" \
             --read-training-yaml "$bl/2kshort-training.yaml" \
             --state-dir "$state_dir" \
             --state-csv "$bl/2kshort-training.csv" \
@@ -166,10 +166,10 @@ if [ ! -f "$ckpt_final" ]; then
     $cmd $train_script prep/asr_baseline.py \
         --read-model-yaml "$bl/model.yaml" \
         --mvn-path "$dlf/ext/mvn.pt" \
+        --num-workers $nwork \
+        --read-data-yaml "$bl/data.yaml" \
         train \
             --init-state-dict "$ckpt_2kshort" \
-            --num-workers $nwork \
-            --read-data-yaml "$bl/data.yaml" \
             --read-training-yaml "$bl/training.yaml" \
             --state-dir "$state_dir" \
             --state-csv "$bl/training.csv" \
@@ -194,10 +194,11 @@ EOF
             $cmd_p prep/asr_baseline.py \
                 --read-model-yaml "$bl/model.yaml" \
                 --mvn-path "$dlf/ext/mvn.pt" \
+                --num-workers $nwork \
+                --read-data-yaml "$bl/data.yaml" \
                 decode \
                     "@$Tdir/decode.args.txt" \
                     --lookup-lm-state-dict "$dlf/ext/lm.pt" \
-                    --read-data-yaml "$bl/data.yaml" \
                     --max-hyp-len 500 \
                     "$ckpt_final" "$dlf/dev_clean" $Tdir && \
                 touch "$Tdir/.complete" &
@@ -275,11 +276,12 @@ for x in dev_clean dev_other test_clean test_other; do
             echo "Decoding $x with $y"
             $cmd_p prep/asr_baseline.py \
                 --read-model-yaml "$bl/model.yaml" \
+                --read-data-yaml "$bl/data.yaml" \
+                --num-workers $nwork \
                 --mvn-path "$dlf/ext/mvn.pt" \
                 decode \
                     "@$bl/$y-tuned.decode.args.txt" \
                     --lookup-lm-state-dict "$dlf/ext/lm.pt" \
-                    --read-data-yaml "$bl/data.yaml" \
                     --max-hyp-len 500 \
                     "$ckpt_final" "$src" "$dst" && \
                 touch "$dst/.complete" &
