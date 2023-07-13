@@ -25,7 +25,7 @@
                     "Tags": [
                         {
                             "Key": "Name",
-                            "Value": "scpc: ${run_sh} ${args}"
+                            "Value": "${name}"
                         }
                     ]
                 }
@@ -54,7 +54,7 @@
             "Tags": [
                 {
                     "Key": "Name",
-                    "Value":"scpc: ${run_sh} ${args}"
+                    "Value":"${name}"
                 }
             ]
         }

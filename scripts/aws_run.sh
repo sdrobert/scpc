@@ -218,7 +218,6 @@ else
 fi
 
 # export
-args="$*"
 for name in EC2_SG_ID SUBNET_IDS EFS_NAME KEY_NAME AWS_REGION IMAGE_ID \
             ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME; do
   if [ -z "${!name}" ]; then
@@ -228,7 +227,11 @@ for name in EC2_SG_ID SUBNET_IDS EFS_NAME KEY_NAME AWS_REGION IMAGE_ID \
   export "$name"
 done
 export user_data ncpu ngpu nmib SNAPSHOT_ID ebs_volume_size delete_ebs acc_man
-export run_sh args
+mods=""
+$is_dirty && mods="dirty"
+$do_tensorboard && mods="${mods:+$mods, }tensorboard"
+export name="scpc${mods:+ ($mods)}: ${run_sh} $*"
+
 
 request_config="$(cat "$cnf" | envsubst)"
 
