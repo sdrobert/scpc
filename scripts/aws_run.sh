@@ -103,6 +103,7 @@ is_dirty=false
 is_print=false
 is_leaf=false
 do_tensorboard=false
+delete_leaf=true
 cnf=conf/aws-spot-fleet-config.template.json
 
 set -e
@@ -215,6 +216,10 @@ if $is_leaf; then
   fi
   echo "Waiting for snapshot to complete"
   aws ec2 wait snapshot-completed --region "$AWS_REGION" --snapshot-ids "$SNAPSHOT_ID"
+  if [ -z "$BUCKET_NAME" ]; then
+    echo "Bucket name is not set! Will not delete leaf EBS when the run is terminated"
+    delete_leaf=false
+  fi
 fi
 
 
@@ -228,6 +233,7 @@ user_data_raw="$(
     -v run_sh="${run_sh}" \
     -v snapshot="${SNAPSHOT_TAG}" \
     -v leaf="${is_leaf}" \
+    -v bucket="${BUCKET_NAME}" \
     '{
       gsub("<RUN_ARGS>", args);
       gsub("<DIRTY>", dirty);
@@ -237,6 +243,7 @@ user_data_raw="$(
       gsub("<RUN_SH>", run_sh);
       gsub("<SNAPSHOT_TAG>", snapshot);
       gsub("<IS_LEAF>", leaf);
+      gsub("<BUCKET_NAME>", bucket);
       print}' \
     scripts/aws_run_internal.template.sh
   )"
@@ -258,7 +265,7 @@ for name in SUBNET_IDS AWS_ACCOUNT_ID FLEET_ROLE_NAME EC2_SG_ID ROLE_NAME KEY_NA
   fi
   export "$name"
 done
-export SNAPSHOT_ID user_data ncpu ngpu nmib acc_man
+export SNAPSHOT_ID user_data ncpu ngpu nmib acc_man delete_leaf
 mods=""
 $is_dirty && mods="dirty"
 $is_leaf && mods="${mods:+$mods, }leaf"

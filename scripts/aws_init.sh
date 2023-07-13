@@ -12,6 +12,7 @@ exit 0
 # stores the following constants:
 # - KEY_NAME (the name of the ssh key you created via console or whatever)
 # - AWS_REGION (the region in which you want everything to run)
+# - BUCKET_NAME (OPTIONAL: name of the s3 bucket to store/load results n' stuff from)
 [ -f "aws_private/aws_vars.sh" ] && source "$PRIVATE_DIR/aws_vars.sh"
 
 # other, less-sensitive stuff (or can be determined dynamically)
@@ -28,7 +29,7 @@ IMAGE_ID=$(aws ec2 describe-images --region $AWS_REGION --owners amazon --filter
 VPC_ID=$(aws ec2 describe-vpcs --filters 'Name=is-default,Values=true' --query 'Vpcs[].VpcId' --output text)
 SUBNET_IDS="$(aws ec2 describe-subnets --region $AWS_REGION --filters "Name=vpc-id,Values=${VPC_ID}" "Name=default-for-az,Values=true" --query 'Subnets[].SubnetId' --output text | tr $'\t' ',')"
 DEFT_SUBNET_ID="$(aws ec2 describe-subnets --region $AWS_REGION --filters "Name=vpc-id,Values=${VPC_ID}" "Name=default-for-az,Values=true" "Name=availability-zone,Values=$DEFT_AWS_ZONE" --query 'Subnets[].SubnetId' --output text)"
-VOL_SIZE=200
+VOL_SIZE=300
 
 # create the EC2 security group
 EC2_SG_ID=$(aws ec2 create-security-group \
@@ -48,14 +49,23 @@ aws ec2 authorize-security-group-ingress \
     --cidr 0.0.0.0/0 \
     --region "$AWS_REGION"
 
+aws s3api create-bucket \
+    --bucket "$BUCKET_NAME" \
+    --region "$AWS_REGION" \
+    --object-ownership BucketOwnerEnforced \
+    --create-bucket-configuration "LocationConstraint=${AWS_REGION}"
+
 # create the volume
 aws ec2 create-volume --size $VOL_SIZE --region $AWS_REGION --availability-zone "${AWS_ZONES%%,*}" --volume-type gp2 --tag-specifications "ResourceType=volume,Tags=[{Key=Name,Value=${VOLUME_TAG}}]"
 
 # create the role for the spot instance
 aws iam create-role --role-name "$ROLE_NAME" --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Sid":"","Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-aws iam create-policy \
-    --policy-name "$POLICY_NAME"  \
-    --policy-document "$(cat "conf/aws-run-policy.json")"
+(
+    export BUCKET_NAME
+    aws iam create-policy \
+        --policy-name "$POLICY_NAME"  \
+        --policy-document "$(cat "conf/aws-run-policy.json" | envsubst)"
+)
 aws iam attach-role-policy \
     --policy-arn "arn:aws:iam::$AWS_ACCOUNT_ID:policy/$POLICY_NAME" \
     --role-name "$ROLE_NAME"

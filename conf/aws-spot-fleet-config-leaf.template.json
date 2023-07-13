@@ -34,7 +34,7 @@
                 {
                     "DeviceName": "/dev/sdf",
                     "Ebs": {
-                        "DeleteOnTermination": false,
+                        "DeleteOnTermination": ${delete_leaf},
                         "SnapshotId": "${SNAPSHOT_ID}"
                     }
                 }
