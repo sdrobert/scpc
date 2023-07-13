@@ -96,7 +96,7 @@ declare -A TR2TDIR=(
 declare -A MDLS
 for f in conf/model.*.yaml; do
     exp_name="${f:11:-5}"
-    act_name="$(awk '$1 == "name:" {print $2}' "$f")"
+    act_name="$(cat "$f" | tr -d '\r' | awk '$1 == "name:" {print $2}')"
     if [ "$exp_name" != "$act_name" ]; then
         echo -e "expected name: in '$f' to be '$exp_name'; got '$act_name';" \
             " ignoring as possible model"
@@ -245,13 +245,13 @@ EOF
     fi
 fi
 
-ft="$(awk -v ft=$DEFT_FT '$1 == "feat_type:" {ft=$2} END {print ft}' "$cfg")"
+ft="$(cat "$cfg" | tr -d '\r' | awk -v ft=$DEFT_FT '$1 == "feat_type:" {ft=$2} END {print ft}')"
 if [ -z "${FTS[$ft]}" ]; then
     echo "expected feat_type: in '$cfg' to be one of ${!FTS[*]}; got $ft"
     exit 1
 fi
 
-tr="$(awk -v tr=$DEFT_TR '$1 == "train_part:" {gsub(/["'"'"']/, "", $2); tr=$2} END {print tr}' "$cfg")"
+tr="$(cat "$cfg" | tr -d '\r' | awk -v tr=$DEFT_TR '$1 == "train_part:" {gsub(/["'"'"']/, "", $2); tr=$2} END {print tr}')"
 if [ -z "${TR2DESC[$tr]}" ]; then
     echo "expected train_part: in '$cfg' to be one of ${!TR2DESC[*]}; got $tr"
     exit 1
@@ -259,7 +259,7 @@ fi
 tdir="${TR2TDIR[$tr]}"
 train_description="${TR2DESC[$tr]}"
 
-system_description="$(awk -v s="$DEFT_SYS" '$1 == "system_description:" {$1=""; print}' "$cfg")"
+system_description="$(cat "$cfg" | tr -d '\r' | awk -v s="$DEFT_SYS" '$1 == "system_description:" {$1=""; print}')"
 
 a="$(mktemp)"
 echo "${FT2TD_ARGS[$ft]}" | tr ' ' '\n' > "$a"
