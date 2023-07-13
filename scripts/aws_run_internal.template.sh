@@ -149,7 +149,7 @@ ln -sf "$(cd /scpc-artifacts/exp; pwd -P)"
 echo "Activating and updating python environment"
 source activate pytorch
 $DO_TENSORBOARD && conda install tensorboard
-conda install -c coml virtual-dataset zerospeech-benchmarks zerospeech-libriabx2 zerospeech-tde
+conda install -c coml "virtual-dataset=1.0.0" "zerospeech-benchmarks=0.9.1" "zerospeech-libriabx2=0.9.7" "zerospeech-tde=2.0.2"
 conda install -c sdrobert pydrobert-kaldi pydrobert-param
 pip install "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc" "git+https://github.com/sdrobert/pydrobert-speech"
 pip install '.[all]'
@@ -161,5 +161,5 @@ if $DO_TENSORBOARD; then
 fi
 
 echo "Running with args ${RUN_ARGS[*]}"
-$RUN_SH -x "--quiet" "${RUN_ARGS[@]}"
+$RUN_SH -zx "--quiet" "${RUN_ARGS[@]}"
 do_cleanup
