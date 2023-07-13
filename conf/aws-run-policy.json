@@ -13,8 +13,7 @@
                 "ec2:CreateSnapshot",
                 "ec2:DescribeSpotInstanceRequests",
                 "ec2:DescribeSnapshots",
-                "ec2:CreateVolume",
-                "elasticfilesystem:DescribeFileSystems"
+                "ec2:CreateVolume"
             ],
             "Resource": "*"
         }

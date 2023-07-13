@@ -25,14 +25,15 @@ fi
 
 RUN_ARGS=( <RUN_ARGS> )
 IS_DIRTY=<DIRTY>
-EFS_NAME=<EFS_NAME>
+VOLUME_TAG='<VOLUME_TAG>'
 DO_TENSORBOARD=<DO_TENSORBOARD>
-
+GIT_REPO='<GIT_REPO>'
+RUN_SH='<RUN_SH>'
+SNAPSHOT_TAG='<SNAPSHOT_TAG>'
+IS_LEAF=<IS_LEAF>
 INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id)"
 INSTANCE_AZ="$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)"
 AWS_REGION="$(curl -s http://169.254.169.254/latest/meta-data/placement/region)"
-EFS_ID=$(aws efs describe-file-systems --region $AWS_REGION --query "FileSystems[?not_null(Tags[?Value == \`$EFS_NAME\`])].FileSystemId" --output text)
-
 
 do_cleanup() {
     if $IS_DIRTY; then
@@ -49,80 +50,101 @@ do_cleanup() {
     fi
 }
 
-# if ! test -e /dev/sdf; then
-#     echo "Getting volume IDs and AZ"
-#     volume_id="$(aws ec2 describe-volumes --region "$AWS_REGION" --filter "Name=tag:Name,Values=<VOLUME_TAG>" --query "Volumes[].VolumeId" --output text)"
-#     volume_az="$(aws ec2 describe-volumes --region "$AWS_REGION" --filter "Name=tag:Name,Values=<VOLUME_TAG>" --query "Volumes[].AvailabilityZone" --output text)"
+if ! test -e /dev/sdf; then
+    echo "Getting volume IDs and AZ"
+    volume_id="$(aws ec2 describe-volumes --region "$AWS_REGION" --filter "Name=tag:Name,Values=$VOLUME_TAG" --query "Volumes[].VolumeId" --output text)"
+    volume_az="$(aws ec2 describe-volumes --region "$AWS_REGION" --filter "Name=tag:Name,Values=$VOLUME_TAG" --query "Volumes[].AvailabilityZone" --output text)"
 
-#     if [ -z "$volume_id" ]; then
-#         echo "Missing volume ID!"
-#         do_cleanup
-#     fi
-#     if [ -z "$volume_az" ]; then
-#         echo "Missing volume AZ!"
-#         do_cleanup
-#     fi
+    if [ -z "$volume_id" ]; then
+        echo "Missing volume ID!"
+        do_cleanup
+    fi
+    if [ -z "$volume_az" ]; then
+        echo "Missing volume AZ!"
+        do_cleanup
+    fi
 
-#     if [ "$volume_az" != "$INSTANCE_AZ" ]; then
-#         echo "Mismatch between volume ($volume_az) and instance ($INSTANCE_AZ) AZ!"
-#         echo "Creating snapshot"
-#         SNAPSHOT_ID="$(aws ec2 create-snapshot --region "$AWS_REGION" --volume-id "$volume_id" --description "`date +"%D %T"`" --tag-specifications 'ResourceType=snapshot,Tags=[{Key=Name,Value=<SNAPSHOT_TAG>}]' --query SnapshotId --output text)"
-#         if [ -z "$SNAPSHOT_ID" ]; then
-#             echo "Snapshot not created"
-#             do_cleanup
-#         fi
-#         echo "Waiting for snapshot to complete"
-#         aws ec2 wait snapshot-completed --region "$AWS_REGION" --snapshot-ids "$SNAPSHOT_ID" || do_cleanup
-#         echo "Waiting for volume to become available"
-#         aws ec2 wait volume-available --region "$AWS_REGION" --volume-ids "$volume_id" || do_cleanup
-#         echo "Deleting old volume"
-#         aws ec2 --region "$AWS_REGION"  delete-volume --volume-id "$volume_id" || do_cleanup
-#         echo "Creating new volume"
-#         volume_id="$(aws ec2 create-volume --region "$AWS_REGION" --availability-zone "$INSTANCE_AZ" --snapshot-id "$SNAPSHOT_ID" --volume-type gp2 --tag-specifications 'ResourceType=volume,Tags=[{Key=Name,Value=<VOLUME_TAG>}]' --query VolumeId --output text)"
-#         if [ -z "$volume_id" ]; then
-#             echo "Volume not created"
-#             do_cleanup
-#         fi
-#         volume_az="$INSTANCE_AZ"
-#     fi
+    if [ "$volume_az" != "$INSTANCE_AZ" ]; then
+        echo "Mismatch between volume ($volume_az) and instance ($INSTANCE_AZ) AZ!"
+        echo "Creating snapshot"
+        SNAPSHOT_ID="$(aws ec2 create-snapshot --region "$AWS_REGION" --volume-id "$volume_id" --description "`date +"%D %T"`" --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=$SNAPSHOT_TAG}]" --query SnapshotId --output text)"
+        if [ -z "$SNAPSHOT_ID" ]; then
+            echo "Snapshot not created"
+            do_cleanup
+        fi
+        echo "Waiting for snapshot to complete"
+        aws ec2 wait snapshot-completed --region "$AWS_REGION" --snapshot-ids "$SNAPSHOT_ID" || do_cleanup
+        echo "Waiting for volume to become available"
+        aws ec2 wait volume-available --region "$AWS_REGION" --volume-ids "$volume_id" || do_cleanup
+        echo "Deleting old volume"
+        aws ec2 --region "$AWS_REGION"  delete-volume --volume-id "$volume_id" || do_cleanup
+        echo "Creating new volume"
+        volume_id="$(aws ec2 create-volume --region "$AWS_REGION" --availability-zone "$INSTANCE_AZ" --snapshot-id "$SNAPSHOT_ID" --volume-type gp2 --tag-specifications "ResourceType=volume,Tags=[{Key=Name,Value=$VOLUME_TAG}]" --query VolumeId --output text)"
+        if [ -z "$volume_id" ]; then
+            echo "Volume not created"
+            do_cleanup
+        fi
+        volume_az="$INSTANCE_AZ"
+    fi
 
-#     echo "Waiting for volume to become available"
-#     aws ec2 wait volume-available --region "$AWS_REGION" --volume-ids "$volume_id" || do_cleanup
+    echo "Waiting for volume to become available"
+    aws ec2 wait volume-available --region "$AWS_REGION" --volume-ids "$volume_id" || do_cleanup
 
-#     echo "Attaching volume"
-#     aws ec2 attach-volume \
-#         --region "$AWS_REGION" --volume-id "$volume_id" \
-#         --instance-id "$INSTANCE_ID" --device /dev/sdf || do_cleanup
-#     aws ec2 wait volume-in-use \
-#         --region "$AWS_REGION" --volume-id "$volume_id" || do_cleanup
-#     sleep 1
-# fi
+    echo "Attaching volume"
+    aws ec2 attach-volume \
+        --region "$AWS_REGION" --volume-id "$volume_id" \
+        --instance-id "$INSTANCE_ID" --device /dev/sdf || do_cleanup
+    aws ec2 wait volume-in-use \
+        --region "$AWS_REGION" --volume-id "$volume_id" || do_cleanup
+    sleep 1
+fi
 
-# file_s="$(sudo file -sL /dev/sdf)"
-# if [[ "$file_s" =~ 'filesystem' ]]; then
-#     echo "Volume already a filesystem"
-# else
-#     echo "Formatting volume"
-#     sudo mkfs -t xfs /dev/sdf || do_cleanup
-# fi
+file_s="$(sudo file -sL /dev/sdf)"
+if [[ "$file_s" =~ 'filesystem' ]]; then
+    echo "Volume already a filesystem"
+else
+    echo "Formatting volume"
+    sudo mkfs -t xfs /dev/sdf || do_cleanup
+fi
+
+if $IS_LEAF; then
+    echo "Tagging leaf volume"
+    leaf_volume="$(aws ec2 describe-volumes --region $AWS_REGION --filter "Name=attachment.instance-id,Values=$INSTANCE_ID" --filter "Name=attachment.device,Values=/dev/sdf" --query 'Volumes[].Attachments[].VolumeId' --output text || true)"
+    if [ -z "$leaf_volume" ]; then
+        echo "Could not determine leaf volume!"
+        do_cleanup
+    fi
+    mods=""
+    $IS_DIRTY && mods="dirty"
+    $IS_LEAF && mods="${mods:+$mods, }leaf"
+    $DO_TENSORBOARD && mods="${mods:+$mods, }tensorboard"
+    name="scpc${mods:+ ($mods)}: ${RUN_SH} ${RUN_ARGS[*]}"
+    aws ec2 create-tags \
+        --region $AWS_REGION \
+        --resources "$leaf_volume" \
+        --tags "Key=Name,Value='$name'" || do_cleanup
+fi
 
 mkdir -p /scpc-artifacts || do_cleanup
 
-if ! mount | grep -q /scpc-artifacts; then
-    echo "Installing amazon efs utils"
-    sudo yum install amazon-efs-utils -y || do_cleanup
-    echo "Mounting EFS volume"
-    mount -t efs -o tls $EFS_ID /scpc-artifacts || do_cleanup
+if ! mount | grep -q /dev/sdf; then
+    echo "Mounting EBS volume"
+    mount /dev/sdf /scpc-artifacts || do_cleanup
 fi
 
-echo "Cloning training source"
-git clone <GIT_REPO>
-cd scpc
+mkdir -p /scpc
+cd /scpc
+
+if ! git status 2> /dev/null; then
+    echo "Cloning training source"
+    git clone --depth 1 "$GIT_REPO" .
+fi
+
 git submodule update --init
 
 mkdir -p /scpc-artifacts/{data,exp}
-ln -s "$(cd /scpc-artifacts/data; pwd -P)"
-ln -s "$(cd /scpc-artifacts/exp; pwd -P)"
+ln -sf "$(cd /scpc-artifacts/data; pwd -P)"
+ln -sf "$(cd /scpc-artifacts/exp; pwd -P)"
 
 echo "Activating and updating python environment"
 source activate pytorch
@@ -139,5 +161,5 @@ if $DO_TENSORBOARD; then
 fi
 
 echo "Running with args ${RUN_ARGS[*]}"
-<RUN_SH> -x "--quiet" "${RUN_ARGS[@]}"
+$RUN_SH -x "--quiet" "${RUN_ARGS[@]}"
 do_cleanup

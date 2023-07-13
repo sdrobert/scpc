@@ -35,6 +35,7 @@ Compatiblility layer for issuing AWS spot fleet requests.
 
 Options
  -$HLP_FLG      Display this message and exit
+ -$LEF_FLG      Run as a leaf (see below)
  -$PNT_FLG      Print the spot fleet request to stdout and exit (WARNING: will
          display potentially sensitive information)
  -$DTY_FLG      If set, will not terminate the spot fleet request nor the
@@ -59,13 +60,13 @@ but is potentially sensitive.
   POLICY_NAME ${POLICY_NAME:+(${POLICY_NAME})}
   ROLE_NAME ${ROLE_NAME:+($ROLE_NAME)}
   EC2_SG_ID ${EC2_SG_ID:+(XXX)}
-  SUBNET_IDS ${SUBNET_IDS:+(XXX)}
-  EFS_NAME ${EFS_NAME:+(${EFS_NAME})}
+  SNAPSHOT_TAG ${SNAPSHOT_TAG:+(${SNAPSHOT_TAG})}
+  VOLUME_TAG ${VOLUME_TAG:+(${VOLUME_TAG})}
 
-ROLE_NAME, FLEET_ROLE_NAME, POLICY_NAME, EFS_NAME, and SNAPSHOT_TAG should all
-have default values. AWS_ZONES, AWS_ACCOUNT_ID, EC2_SG_ID, SUBNET_IDS, and
-IMAGE_ID may be inferred later with aws commands (assuming appropriate
-privileges).
+ROLE_NAME, FLEET_ROLE_NAME, POLICY_NAME, SNAPSHOT_TAG, and SNAPSHOT_TAG and
+VOLUME_TAG should all have default values. AWS_ZONES, AWS_ACCOUNT_ID,
+EC2_SG_ID, SUBNET_IDS, and IMAGE_ID may be inferred later with aws commands
+(assuming appropriate privileges).
 
 EOF
     fi
@@ -73,22 +74,24 @@ EOF
 }
 
 # constants
-HLP_FLG=h
-PNT_FLG=P
-DTY_FLG=D
 CPU_FLG=C
+DTY_FLG=D
 GPU_FLG=G
+HLP_FLG=h
+LEF_FLG=L
 MEM_FLG=M
+PNT_FLG=P
 RUN_FLG=R
-URL_FLG=U
 TSB_FLG=T
+URL_FLG=U
 
 # env vars with defaults
 ROLE_NAME="${ROLE_NAME:-scpc-run}"
 FLEET_ROLE_NAME="${FLEET_ROLE_NAME:-aws-ec2-spot-fleet-tagging-role}"
 POLICY_NAME="${POLICY_NAME:-scpc-run-policy}"
-EFS_NAME="${EFS_NAME:-scpc-artifacts}"
 EC2_SG_NAME="${EC2_SG_NAME:-scpc-ec2-sg}"
+VOLUME_TAG="${VOLUME_TAG:-scpc-artifacts}"
+SNAPSHOT_TAG="${SNAPSHOT_TAG:-scpc-snapshots}"
 
 # variables
 ncpu=4
@@ -98,18 +101,22 @@ run_sh="./run.sh"
 repo="https://github.com/sdrobert/scpc.git"
 is_dirty=false
 is_print=false
+is_leaf=false
 do_tensorboard=false
 cnf=conf/aws-spot-fleet-config.template.json
 
 set -e
 
-while getopts "${HLP_FLG}${PNT_FLG}${DTY_FLG}${TSB_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${RUN_FLG}:${URL_FLG}:" opt; do
+while getopts "${HLP_FLG}${PNT_FLG}${LEF_FLG}${DTY_FLG}${TSB_FLG}${CPU_FLG}:${GPU_FLG}:${MEM_FLG}:${RUN_FLG}:${URL_FLG}:" opt; do
   case $opt in
     ${HLP_FLG})
       usage 0
       ;;
     ${PNT_FLG})
       is_print=true
+      ;;
+    ${LEF_FLG})
+      is_leaf=true
       ;;
     ${DTY_FLG})
       is_dirty=true
@@ -189,21 +196,47 @@ if [ -z "$SUBNET_IDS" ]; then
     exit 1
   fi
 fi
+if $is_leaf; then
+  echo "Will make a leaf"
+  cnf="conf/aws-spot-fleet-config-leaf.template.json"
+  if [ -z "$SNAPSHOT_ID" ]; then
+    echo "SNAPSHOT_ID is not set. Creating a snapshot. First, determine volume"
+    volume_id="$(aws ec2 describe-volumes --region "$AWS_REGION" --filter "Name=tag:Name,Values=${VOLUME_TAG}" --query "Volumes[].VolumeId" --output text || true)"
+    if [ -z "$volume_id" ]; then
+      echo "Could not determine volume"
+      exit 1
+    fi
+    echo "Creating snapshot"
+    SNAPSHOT_ID="$(aws ec2 create-snapshot --region "$AWS_REGION" --volume-id "$volume_id" --description "`date +"%D %T"`" --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${SNAPSHOT_TAG}}]" --query SnapshotId --output text || true)"
+    if [ -z "$SNAPSHOT_ID" ]; then
+      echo "Could not create snapshot"
+      exit 1
+    fi
+  fi
+  echo "Waiting for snapshot to complete"
+  aws ec2 wait snapshot-completed --region "$AWS_REGION" --snapshot-ids "$SNAPSHOT_ID"
+fi
+
+
 
 user_data_raw="$(
   awk -v args="$(printf " '%s' " "$@")" \
+    -v dirty="${is_dirty}" \
+    -v volume="${VOLUME_TAG}" \
+    -v tb="${do_tensorboard}" \
     -v repo="${repo}" \
     -v run_sh="${run_sh}" \
-    -v dirty="${is_dirty}" \
-    -v efs="${EFS_NAME}" \
-    -v tb="${do_tensorboard}" \
+    -v snapshot="${SNAPSHOT_TAG}" \
+    -v leaf="${is_leaf}" \
     '{
       gsub("<RUN_ARGS>", args);
+      gsub("<DIRTY>", dirty);
+      gsub("<VOLUME_TAG>", volume);
+      gsub("<DO_TENSORBOARD>", tb);
       gsub("<GIT_REPO>", repo);
       gsub("<RUN_SH>", run_sh);
-      gsub("<DIRTY>", dirty);
-      gsub("<EFS_NAME>", efs);
-      gsub("<DO_TENSORBOARD>", tb);
+      gsub("<SNAPSHOT_TAG>", snapshot);
+      gsub("<IS_LEAF>", leaf);
       print}' \
     scripts/aws_run_internal.template.sh
   )"
@@ -218,17 +251,17 @@ else
 fi
 
 # export
-for name in EC2_SG_ID SUBNET_IDS EFS_NAME KEY_NAME AWS_REGION IMAGE_ID \
-            ROLE_NAME AWS_ACCOUNT_ID FLEET_ROLE_NAME; do
+for name in SUBNET_IDS AWS_ACCOUNT_ID FLEET_ROLE_NAME EC2_SG_ID ROLE_NAME KEY_NAME IMAGE_ID AWS_ZONES; do
   if [ -z "${!name}" ]; then
     echo "Environment variable '$name' was not set and could not be determined"
     exit 1
   fi
   export "$name"
 done
-export user_data ncpu ngpu nmib SNAPSHOT_ID ebs_volume_size delete_ebs acc_man
+export SNAPSHOT_ID user_data ncpu ngpu nmib acc_man
 mods=""
 $is_dirty && mods="dirty"
+$is_leaf && mods="${mods:+$mods, }leaf"
 $do_tensorboard && mods="${mods:+$mods, }tensorboard"
 export name="scpc${mods:+ ($mods)}: ${run_sh} $*"
 

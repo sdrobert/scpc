@@ -30,6 +30,16 @@
                     ]
                 }
             ],
+            "BlockDeviceMappings": [
+                {
+                    "DeviceName": "/dev/sdf",
+                    "Ebs": {
+                        "DeleteOnTermination": false,
+                        "SnapshotId": "${SNAPSHOT_ID}"
+                    }
+                }
+            ],
+            "SubnetId": "${SUBNET_IDS}",
             "UserData": "${user_data}",
             "InstanceRequirements": {
                 "VCpuCount": {
