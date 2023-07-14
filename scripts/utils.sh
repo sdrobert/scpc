@@ -121,7 +121,7 @@ filter() {
 _argcheck_is() {
   local cmd="${!#}"
   if ! "$cmd" "${@:3:$#-3}"; then
-    echo "$0: argparse -$2 value '${@:$#-1:1}' $1" 1>&2
+    echo "$0: argparse ${2:+-}${2:-positional} value '${@:$#-1:1}' $1" 1>&2
     declare -F "usage" > /dev/null && usage
     exit 1
   fi
@@ -145,7 +145,7 @@ _argcheck_all() {
   read -ra a <<<"${@:$#-1:1}"
   for (( i = 0; i < "${#a[@]}"; i++ )); do
     if ! "$cmd" "${@:3:$#-4}" "${a[$i]}"; then
-      echo "$0: argparse -$2 value $(($i+1)), '${a[$i]}', $1" 1>&2
+      echo "$0: argparse ${2:+-}${2:-positional} value $(($i+1)), '${a[$i]}', $1" 1>&2
       declare -F "usage" > /dev/null && usage
       exit 1
     fi
