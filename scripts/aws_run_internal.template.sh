@@ -62,23 +62,23 @@ do_cleanup() {
     fi
 }
 
-if $IS_LEAF; then
-    echo "Tagging leaf volume"
-    leaf_volume="$(aws ec2 describe-volumes --region $AWS_REGION --filter "Name=attachment.instance-id,Values=$INSTANCE_ID" --filter "Name=attachment.device,Values=/dev/sdf" --query 'Volumes[].Attachments[].VolumeId' --output text || true)"
-    if [ -z "$leaf_volume" ]; then
-        echo "Could not determine leaf volume!"
-        do_cleanup 1
-    fi
-    mods=""
-    $IS_DIRTY && mods="dirty"
-    $IS_LEAF && mods="${mods:+$mods, }leaf"
-    $DO_TENSORBOARD && mods="${mods:+$mods, }tensorboard"
-    name="scpc${mods:+ ($mods)}: ${RUN_SH} ${RUN_ARGS[*]}"
-    aws ec2 create-tags \
-        --region $AWS_REGION \
-        --resources "$leaf_volume" \
-        --tags "Key=Name,Value='$name'" || do_cleanup
-fi
+# if $IS_LEAF; then
+#     echo "Tagging leaf volume"
+#     leaf_volume="$(aws ec2 describe-volumes --region $AWS_REGION --filter "Name=attachment.instance-id,Values=$INSTANCE_ID" --filter "Name=attachment.device,Values=/dev/sdf" --query 'Volumes[].Attachments[].VolumeId' --output text || true)"
+#     if [ -z "$leaf_volume" ]; then
+#         echo "Could not determine leaf volume!"
+#         do_cleanup 1
+#     fi
+#     mods=""
+#     $IS_DIRTY && mods="dirty"
+#     $IS_LEAF && mods="${mods:+$mods, }leaf"
+#     $DO_TENSORBOARD && mods="${mods:+$mods, }tensorboard"
+#     name="scpc${mods:+ ($mods)}: ${RUN_SH} ${RUN_ARGS[*]}"
+#     aws ec2 create-tags \
+#         --region $AWS_REGION \
+#         --resources "$leaf_volume" \
+#         --tags "Key=Name,Value='$name'" || do_cleanup
+# fi
 
 if ! test -e /dev/sdf; then
     if $IS_LEAF; then
