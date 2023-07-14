@@ -50,7 +50,7 @@ ckpt_final="$bl/final.pt"
 dlf="$em/reps"
 
 WIDTHS=( 1 4 16 64 )
-BETAS=( 0 1 )
+CONDS=( lm nolm )
 
 ckpt_pre="$em/best.ckpt"
 if [ ! -f "$ckpt_pre" ]; then
@@ -142,9 +142,9 @@ if [ ! -f "$ckpt_2kshort" ]; then
     $cmd $train_script prep/asr_baseline.py \
         --read-model-yaml "$bl/model.yaml" \
         --mvn-path "$dlf/ext/mvn.pt" \
-        --num-workers $nwork \
-        --read-data-yaml "$bl/data.yaml" \
         train \
+            --num-workers $nwork \
+            --read-data-yaml "$bl/data.yaml" \
             --read-training-yaml "$bl/2kshort-training.yaml" \
             --state-dir "$state_dir" \
             --state-csv "$bl/2kshort-training.csv" \
@@ -166,25 +166,36 @@ if [ ! -f "$ckpt_final" ]; then
     $cmd $train_script prep/asr_baseline.py \
         --read-model-yaml "$bl/model.yaml" \
         --mvn-path "$dlf/ext/mvn.pt" \
-        --num-workers $nwork \
-        --read-data-yaml "$bl/data.yaml" \
         train \
             --init-state-dict "$ckpt_2kshort" \
+            --num-workers $nwork \
+            --read-data-yaml "$bl/data.yaml" \
             --read-training-yaml "$bl/training.yaml" \
             --state-dir "$state_dir" \
             --state-csv "$bl/training.csv" \
             $xtra_args "$dlf/"{train_clean_100,dev_clean} "$ckpt_final"
-    $clean && rm -rf "$state_dir"
+    if $clean; then
+        rm -rf "$state_dir"
+        for x in "$dlf/train_*"; do
+            find "$x" -name 'lbi-*.pt' -delete
+        done
+    fi
     ((only)) && exit 0
 fi
 
 rem=$nproc
 for width in "${WIDTHS[@]}"; do
-    for beta in "${BETAS[@]}"; do
-        Tdir="$blt/${width}_${beta}"
+    for cond in "${CONDS[@]}"; do
+        Tdir="$blt/${cond}_b${width}"
         if [ ! -f "$Tdir/.complete" ]; then
             mkdir -p "$Tdir"
-            echo "Checking combination --beam-width $width --beta $beta"
+            echo "Checking $cond with beam width $width"
+            if [ "$cond" = "lm" ]; then
+                beta=0.5
+            else
+                beta=0
+            fi
+            find "$Tdir/" -name 'lbi-*.pt' -delete
             cat << EOF > "$Tdir/decode.args.txt"
 --beam-width
 $width
@@ -194,11 +205,10 @@ EOF
             $cmd_p prep/asr_baseline.py \
                 --read-model-yaml "$bl/model.yaml" \
                 --mvn-path "$dlf/ext/mvn.pt" \
-                --num-workers $nwork \
-                --read-data-yaml "$bl/data.yaml" \
                 decode \
                     "@$Tdir/decode.args.txt" \
                     --lookup-lm-state-dict "$dlf/ext/lm.pt" \
+                    --read-data-yaml "$bl/data.yaml" \
                     --max-hyp-len 500 \
                     "$ckpt_final" "$dlf/dev_clean" $Tdir && \
                 touch "$Tdir/.complete" &
@@ -220,68 +230,51 @@ EOF
 done
 
 for width in "${WIDTHS[@]}"; do
-    for beta in "${BETAS[@]}"; do
-        Tdir="$blt/${width}_${beta}"
+    for cond in "${CONDS[@]}"; do
+        Tdir="$blt/${cond}_b${width}"
         if [ ! -f "$Tdir/score.txt" ]; then
             $cmd_p compute-torch-token-data-dir-error-rates \
                 --quiet \
                 "$dlf/dev_clean/ref" "$Tdir"  > "$Tdir/score.txt" \
                 || (rm -f "$Tdir/score.txt" && exit 1)
-            rm -f "$Tdir/"*.pt
+            $clean && find "$Tdir/" -name 'lbi-*.pt' -delete
             ((only)) && exit 0
         fi
     done
 done
 
-if [ ! -f "$bl/lm-tuned.decode.args.txt" ]; then
-    best_er=1000
-    best_args=DEADBEEF
-    for beta in "${BETAS[@]}"; do
-        [ $beta -eq 0 ] && continue
+for cond in "${CONDS[@]}"; do
+    if [ ! -f "$bl/$cond-tuned.decode.args.txt" ]; then
+        best_er=1000
+        best_args=DEADBEEF
         for width in "${WIDTHS[@]}"; do
-            Tdir="$blt/${width}_${beta}"
+            Tdir="$blt/${cond}_b${width}"
             er=$(cat "$Tdir/score.txt")
             if (( $(echo "$er < $best_er" | bc -l) )); then
                 best_er=$er
                 best_args="$Tdir/decode.args.txt"
             fi
         done
-    done
-    cp "$best_args" "$bl/lm-tuned.decode.args.txt"
-    ((only)) && exit 0
-fi
-
-if [ ! -f "$bl/nolm-tuned.decode.args.txt" ]; then
-    best_er=1000
-    best_args=DEADBEEF
-    for width in "${WIDTHS[@]}"; do
-        Tdir="$blt/${width}_0"
-        er=$(cat "$Tdir/score.txt")
-        if (( $(echo "$er < $best_er" | bc -l) )); then
-            best_er=$er
-            best_args="$Tdir/decode.args.txt"
-        fi
-    done
-    cp "$best_args" "$bl/nolm-tuned.decode.args.txt"
-    ((only)) && exit 0
-fi
+        cp "$best_args" "$bl/$cond-tuned.decode.args.txt"
+        ((only)) && exit 0
+    fi
+done
 
 rem=$nproc
 for x in dev_clean dev_other test_clean test_other; do
     src="$dlf/$x"
-    for y in lm nolm; do
+    for y in "${CONDS[@]}"; do
         dst="$bld/$x/$y"
         if [ ! -f "$dst/.complete" ]; then
             mkdir -p "$dst"
             echo "Decoding $x with $y"
             $cmd_p prep/asr_baseline.py \
                 --read-model-yaml "$bl/model.yaml" \
-                --read-data-yaml "$bl/data.yaml" \
-                --num-workers $nwork \
                 --mvn-path "$dlf/ext/mvn.pt" \
                 decode \
                     "@$bl/$y-tuned.decode.args.txt" \
                     --lookup-lm-state-dict "$dlf/ext/lm.pt" \
+                    --read-data-yaml "$bl/data.yaml" \
                     --max-hyp-len 500 \
                     "$ckpt_final" "$src" "$dst" && \
                 touch "$dst/.complete" &
@@ -307,7 +300,7 @@ for x in dev_clean dev_other test_clean test_other; do
     if [ ! -f "$bld/scores.$x.txt" ]; then
         cp -f "$dlf/ext/$x.ref.trn" "$bld/$x.ref.chr.trn"
         $cmd_p prep/subword2word.py "$bld/$x.ref."{chr,wrd}".trn"
-        for y in lm nolm; do
+        for y in "${COND[@]}"; do
             $cmd_p torch-token-data-dir-to-trn \
                 --num-workers $nwork \
                 "$bld/$x/$y" "$dlf/ext/id2token.txt" "$bld/$x.hyp.chr.$y.trn"
@@ -315,17 +308,18 @@ for x in dev_clean dev_other test_clean test_other; do
         done
         for y in chr wrd; do
             prep/error-rates-from-trn.py --suppress-warning \
-                "$bld/$x.ref.$y.trn" "$bld/$x.hyp.$y."{lm,nolm}.trn \
+                "$bld/$x.ref.$y.trn" "$bld/$x.hyp.$y."*.trn \
                 > "$bld/scores.$x.$y.txt"
         done
         cat "$bld/scores.$x."*.txt > "$bld/scores.$x.txt"
+        $clean && find "$dlf/" -name 'lbi-*.pt' -delete
         ((only)) && exit 0
     fi
 done
 
 if $clean; then
     rm -rf "$bl/states_"*
-    find "$dlf/" -name 'lbi-*-.pt' -delete
+    find "$dlf/" -name 'lbi-*.pt' -delete
 fi
 
 cat "$bld/scores."{dev_clean,dev_other,test_clean,test_other}.txt
