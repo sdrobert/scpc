@@ -3,16 +3,16 @@ system_description: "CPC-small but with transfomers"
 context_type: csa
 conv:
   output_size: 256
-  norm_type: channel
 csa:
   max_width: 128
+  dim_feedforward: 1024
 training:
-  num_devices: 4
+  num_devices:
   data:
     common:
-      batch_size: 3
+      batch_size: 12
       drop_last: true
   cpc_loss:
     prediction_type: csa
   chunking:
-    max_chunks: 16
+    max_chunks: 64

@@ -193,16 +193,16 @@ if [ ! -f "$ckpt" ]; then
     ((only)) && exit 0
 fi
 
-for pca in "${!PCAS[@]}"; do
-    pcaf="$em/pca_$pca.pt"
-    if [ ! -f "$pcaf" ]; then
-        echo "PCA of dim $pca being performed for $model"
-        $cmd_p scpc-pca \
-            --read-yaml conf/pca.yaml --device cuda --num-workers=$nwork \
-            "$dlf/${tdir}_test_subset" "$ckpt" $pca "$pcaf"
-        ((only)) && exit 0
-    fi
-done
+# for pca in "${!PCAS[@]}"; do
+#     pcaf="$em/pca_$pca.pt"
+#     if [ ! -f "$pcaf" ]; then
+#         echo "PCA of dim $pca being performed for $model"
+#         $cmd_p scpc-pca \
+#             --read-yaml conf/pca.yaml --device cuda --num-workers=$nwork \
+#             "$dlf/${tdir}_test_subset" "$ckpt" $pca "$pcaf"
+#         ((only)) && exit 0
+#     fi
+# done
 
 if $clean; then
     find "$em/" -name '*.ckpt' -not -name 'best.ckpt' -delete

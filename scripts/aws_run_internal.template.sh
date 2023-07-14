@@ -181,25 +181,33 @@ ln -sf "$(cd /scpc-ebs/data; pwd -P)"
 
 echo "Activating and updating python environment"
 source activate pytorch
-$DO_TENSORBOARD && conda install tensorboard
-conda install -c coml "virtual-dataset=1.0.0" "zerospeech-benchmarks=0.9.1" "zerospeech-libriabx2=0.9.7" "zerospeech-tde=2.0.2"
-conda install -c sdrobert pydrobert-kaldi pydrobert-param
-pip install "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc" "git+https://github.com/sdrobert/pydrobert-speech"
-pip install '.[all]'
+if [ ! -f .install_complete ]; then
+    $DO_TENSORBOARD && conda install tensorboard
+    conda install -c coml "virtual-dataset=1.0.0" "zerospeech-benchmarks=0.9.1" "zerospeech-libriabx2=0.9.7" "zerospeech-tde=2.0.2"
+    conda install -c sdrobert pydrobert-kaldi pydrobert-param
+    pip install "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc" "git+https://github.com/sdrobert/pydrobert-speech"
+    pip install '.[all]'
+    touch .install_complete
+fi
 
 if [ -z "$BUCKET_NAME" ]; then
     echo "Bucket unavailable for exp/"
 else
     echo "Bucket specified! Will sync down exp"
     echo "Determining model directory..."
-    source scripts/preamble.sh "${RUN_ARGS[@]}" > /dev/null
+    em="$(source scripts/preamble.sh "${RUN_ARGS[@]}" > /dev/null 2> /dev/null; echo "$em")"
     if [ -z "$em" ]; then
         echo "Model directory cannot be inferred. Will not sync!"
     else
-        echo "Model directory inferred as $em. Will sync from bucket"
-        rm -rf "$em"
-        mkdir -p "$em"
-        aws s3 sync "s3://${BUCKET_NAME}/$em/" "$em/" || do_cleanup
+        if [ ! -f ".sync_complete" ]; then
+            echo "Model directory inferred as $em. Will sync from bucket"
+            rm -rf "$em"
+            mkdir -p "$em"
+            aws s3 sync "s3://${BUCKET_NAME}/$em/" "$em/" || do_cleanup
+            touch .sync_complete
+        else
+            echo "Looks like we already synced this..."
+        fi
     fi
 fi
 
