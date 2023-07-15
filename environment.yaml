@@ -18,7 +18,9 @@ dependencies:
   - numpy >=1.21
   - omegaconf >=2.1.1
   - pandas
+  - pingouin
   - pip
+  - pydantic<2
   - pydrobert-kaldi
   - pydrobert-param >=0.4.0
   - pysoundfile
@@ -48,7 +50,6 @@ dependencies:
   - zerospeech-benchmarks
   - zerospeech-libriabx2
   - zerospeech-tde
-  - pydantic<2
   - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch and pydrobert-speech release >0.3.0
     - "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc"
     - "git+https://github.com/sdrobert/pydrobert-speech"
