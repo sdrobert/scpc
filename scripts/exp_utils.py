@@ -58,7 +58,7 @@ def collate_data(
 
     model_data, res_data = [], []
     exp_dir: Path = Path(exp_dir)
-    for id, pth in enumerate(exp_dir.glob("**/**/model.yaml")):
+    for id, pth in enumerate(exp_dir.glob("*/*/model.yaml")):
         model, version = pth.parts[-3:-1]
         if model in model_blacklist:
             continue
@@ -67,6 +67,7 @@ def collate_data(
         datum["id"] = id
         # clobbers useless 'name' field
         datum["name"] = f"{model}/{version}"
+        datum["version"] = int(version.split("_")[1])
         model_data.append(datum)
 
         if results_from == "zrc":
@@ -90,11 +91,14 @@ def collate_data(
                     continue
                 for epoch, val_loss in zip(ea.Scalars("epoch"), ea.Scalars("val_loss")):
                     assert epoch.step == val_loss.step
-                    datum = dict(id=id, tb=dict(
-                        step=int(epoch.step),
-                        epoch=int(epoch.value),
-                        val_loss=val_loss.value
-                    ))
+                    datum = dict(
+                        id=id,
+                        tb=dict(
+                            step=int(epoch.step),
+                            epoch=int(epoch.value),
+                            val_loss=val_loss.value,
+                        ),
+                    )
                     res_data.append(datum)
         else:
             raise NotImplementedError
@@ -189,9 +193,9 @@ def check_data(df: pd.DataFrame, *cols: str) -> None:
             raise ValueError(f"col '{col}' from var contains N/A value(s)")
 
     # now check that the only remaining variable columns can be found in cols
-    # (except "name", which is probably varying with the values in cols)
+    # (except "name" and "version", which are probably varying with the values in cols)
     for col in df.columns:
-        if col in cols or col == "name":
+        if col in cols or col in ("name", "version"):
             continue
         unique_vals = df[col].unique()
         if len(unique_vals) > 1:
@@ -202,9 +206,7 @@ A = TypeVar("A")
 
 
 def _filter_preamble(
-    df: pd.DataFrame,
-    args: Sequence[Dict[str, A]],
-    kwargs: Dict[str, A],
+    df: pd.DataFrame, args: Sequence[Dict[str, A]], kwargs: Dict[str, A],
 ) -> Dict[str, A]:
     if len(args) > 1 or (len(args) == 1) == (len(kwargs) > 0):
         raise ValueError("Either pass dict or keyword args")
