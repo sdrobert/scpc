@@ -1,19 +1,23 @@
 {
   "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/*/**": true,
     ".micromamba/": true,
     "**/data/**": true,
-    "**/exp/**": true
+    "**/exp/**": true,
   },
   "search.exclude": {
-    "**/data": true,
-    "**/exp": true,
-    "data/": true,
-    "exp/": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/*/**": true,
     ".micromamba/": true,
+    "**/data/**": true,
+    "**/exp/**": true,
   },
   "python.analysis.exclude": [
-    "**/data",
-    "data/"
+    "**/data/**",
+    "**/exp/**",
   ],
   "python.analysis.extraPaths": [
     "./prep"

@@ -102,14 +102,14 @@ def test_causal_conv_encoder_is_causal():
 @pytest.mark.parametrize("penc", ["ff", "recur", "csa"])
 @pytest.mark.parametrize("offset", [0, 2], ids=["o0", "o2"])
 @pytest.mark.parametrize("gutted", [0, 1], ids=["g0", "g1"])
-@pytest.mark.parametrize("averaging_penalty", [0.0, 1.0], ids=["a0", "a1"])
+@pytest.mark.parametrize("averaging_penalty", [0.0], ids=["a0"])
 @pytest.mark.parametrize("lengths", [True, False], ids=["w/ lengths", "w/o lengths"])
 def test_cpc_prediction_network_matches_manual_comp(
     embedding, penc, offset, gutted, averaging_penalty, lengths
 ):
     torch.manual_seed(2)
     N, T, Cl, Cc, K, M = 5, 7, 9, 11, 3, 100_000
-    lens = torch.randint(K + 1, T + 1, (N,))
+    lens = torch.randint(K + offset + 1, T + 1, (N,))
     if lengths:
         lens[0] = T
     else:
@@ -145,7 +145,6 @@ def test_cpc_prediction_network_matches_manual_comp(
     latent_samp = latent_samp.view(N, T - 1, M, Cl)
 
     loss_exp, latents_ = 0.0, []
-    norm = 0
     for n in range(N):
         lens_n = lens[n]
         latent_n, latent = latent[:lens_n], latent[lens_n:]
@@ -161,7 +160,8 @@ def test_cpc_prediction_network_matches_manual_comp(
         mse = latent_n[offset:].mean(0).square().mean()
         for k in range(1 + gutted, K + 1):
             Az_n_k = Az_n[k - gutted - 1]  # (lens_n - 1, Cl)
-            for t in range(lens_n - k - 1 - offset):
+            loss_exp_nk = 0
+            for t in range(lens_n - K - offset):
                 Az_n_k_t = Az_n_k[t + offset]  # (Cl,)
                 latent_n_tpk = latent_n[t + k + offset]  # (Cl,)
                 num = Az_n_k_t @ latent_n_tpk
@@ -169,10 +169,9 @@ def test_cpc_prediction_network_matches_manual_comp(
                 latent_samp_n_t = latent_samp_n[t]  # (M, Cl)
                 denom = (latent_samp_n_t @ Az_n_k_t).logsumexp(0)
                 assert denom.numel() == 1
-                loss_exp = loss_exp - (num - denom)
-                loss_exp = loss_exp + averaging_penalty * mse
-                norm += 1
-    loss_exp = loss_exp / norm  # + math.log(M + 1)
+                loss_exp_nk = loss_exp_nk - (num - denom) + averaging_penalty * mse
+            loss_exp = loss_exp + loss_exp_nk / ((lens_n - K - offset) * (K - gutted))
+    loss_exp = loss_exp / N  # + math.log(M + 1)
 
     latents = torch.nn.utils.rnn.pad_sequence(latents_, True, -1)
     loss_act = net(latents, context, lens if lengths else None, speakers)

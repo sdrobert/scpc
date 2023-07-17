@@ -559,7 +559,7 @@ class CausalConvEncoder(Encoder, json_name="cconv"):
         assert isinstance(dict_["args"], list)
         assert isinstance(self.convs[0], torch.nn.Conv1d)
         dict_["args"].extend(
-            [self.kernel_size, self.num_layers, self.nonlin_type, self.dropout_prob,]
+            [self.kernel_size, self.num_layers, self.nonlin_type, self.dropout_prob]
         )
         return dict_
 
@@ -685,6 +685,12 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
         valid = x.new_ones(out_shape, dtype=torch.bool)
         if lens is not None:
             valid = get_length_mask(valid, lens.repeat_interleave(self.num_heads))
+            # XXX(sdrobert): the following line is defensive. It ensures that any row
+            # past the length of the sequence (corresponding to some padded query x)
+            # attends to all values of x. Since the query is padding, the returned value
+            # should be ignored, but this line avoids a NaN being put there.
+            valid = valid | ~(valid.transpose(1, 2))
+            # assert valid[0, min(lens[0], T - 1)].all()
         return valid
 
     def get_mask(self, x: torch.Tensor, lens: Optional[torch.Tensor]) -> torch.Tensor:
@@ -1038,10 +1044,9 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
 
         if lens is None:
             phi_n = latent[:, O:].flatten(end_dim=1)
-            norm = latent.new_ones(1)
         else:
-            norm = (lens - K - O).clamp_min_(0).sum() * Kp
-            assert norm > 0, "prediction window too large"
+            norm = (lens - K - O) * Kp * N
+            assert (norm > 0).all(), "prediction window too large for sequences"
             mask = get_length_mask(latent, lens, seq_dim=1)
             mask[:, :O] = False
             phi_n = latent[mask].view(-1, C)
@@ -1059,13 +1064,12 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         del phi_k
 
         loss = denom - num  # neg num - denom
-        if lens is not None:
-            mask_ = ~get_length_mask(loss, lens - K - O, seq_dim=1)
         if lens is None:
             loss = loss.mean()
         else:
-            loss = loss.masked_fill(mask_, 0.0).sum()
-            loss = loss / norm
+            mask_ = ~get_length_mask(loss, lens - K - O, seq_dim=1)
+            loss = (loss / norm.view(N, 1, 1)).masked_fill(mask_, 0.0).sum()
+            del mask_
         if self.averaging_penalty > 0.0:
             if lens is None:
                 latent = latent[:, O:].mean(1)  # (N, C)
@@ -1074,7 +1078,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
                 mask /= mask.sum(2, keepdim=True).clamp_min_(1.0)
                 latent = (latent.transpose(1, 2) * mask).sum(2)
             loss = loss + latent.square().mean() * self.averaging_penalty
-        return loss  # + math.log(M + 1)
+        return loss
 
 
 class BestRqLossNetwork(torch.nn.Module, Generic[E]):

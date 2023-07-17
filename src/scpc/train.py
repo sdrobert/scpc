@@ -259,6 +259,12 @@ class TrainingParams(param.Parameterized):
     )
     dropout_prob: float = param.Magnitude(0.0, doc="Probability of dropping out a unit")
 
+    accumulate_grad_batches: int = param.Integer(
+        1,
+        bounds=(1, None),
+        doc="How many per-batch gradients to compute before updating weights",
+    )
+
     chunking: Optional[ChunkingParams] = param.ClassSelector(
         ChunkingParams, instantiate=False, doc="Parameters for chunking"
     )
@@ -734,16 +740,26 @@ class LightningPretrainedFrontend(pl.LightningModule):
 
     def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         loss = self.pretrain_step(batch, batch_idx)
+        # don't incur the overhead
+        self.log("train_loss", loss, batch_size=batch[0].size(0), sync_dist=False)
         return loss
 
     def validation_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         loss = self.pretrain_step(batch, batch_idx)
-        self.log("val_loss", loss, batch_size=batch[0].size(0), sync_dist=True)
+        self.log(
+            "val_loss", loss, batch_size=batch[0].size(0), sync_dist=True, prog_bar=True
+        )
         return loss
 
     def test_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         loss = self.pretrain_step(batch, batch_idx)
-        self.log("test_loss", loss, batch_size=batch[0].size(0), sync_dist=True)
+        self.log(
+            "test_loss",
+            loss,
+            batch_size=batch[0].size(0),
+            sync_dist=True,
+            prog_bar=True,
+        )
         return loss
 
     def on_before_batch_transfer(self, batch: Batch, dataloader_idx: int) -> Batch:
@@ -938,6 +954,7 @@ def main(args: Optional[Sequence[str]] = None):
         num_nodes=tparams.num_nodes,
         max_epochs=tparams.max_epochs,
         enable_progress_bar=enable_progress_bar,
+        accumulate_grad_batches=tparams.accumulate_grad_batches,
     )
     trainer.fit(lpf, data, ckpt_path="last")
     # require training to have finished before saving

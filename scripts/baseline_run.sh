@@ -50,7 +50,7 @@ ckpt_final="$bl/final.pt"
 dlf="$em/reps"
 
 WIDTHS=( 1 4 16 64 )
-CONDS=( lm nolm )
+CONDS=( nolm )
 
 ckpt_pre="$em/best.ckpt"
 if [ ! -f "$ckpt_pre" ]; then
@@ -295,12 +295,13 @@ for x in dev_clean dev_other test_clean test_other; do
     done
 done
 
+set -x
 for x in dev_clean dev_other test_clean test_other; do
     echo "Computing final error rates for $x..."
     if [ ! -f "$bld/scores.$x.txt" ]; then
         cp -f "$dlf/ext/$x.ref.trn" "$bld/$x.ref.chr.trn"
         $cmd_p prep/subword2word.py "$bld/$x.ref."{chr,wrd}".trn"
-        for y in "${COND[@]}"; do
+        for y in "${CONDS[@]}"; do
             $cmd_p torch-token-data-dir-to-trn \
                 --num-workers $nwork \
                 "$bld/$x/$y" "$dlf/ext/id2token.txt" "$bld/$x.hyp.chr.$y.trn"

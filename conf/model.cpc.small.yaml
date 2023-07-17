@@ -7,13 +7,12 @@ recur:
   num_layers: 2
   recurrent_type: lstm
 training:
-  num_devices: 1
+  num_devices:
   data:
     common:
-      batch_size: 12
+      batch_size: 6
       drop_last: true
   cpc_loss:
     prediction_type: csa
-    gutted_steps: 11
   chunking:
-    max_chunks: 64
+    policy: none
