@@ -29,7 +29,7 @@ import pydrobert.param.argparse as pargparse
 
 from pydrobert.torch.lightning import LitSpectDataModuleParams, LitSpectDataModule
 from pydrobert.torch.modules import ChunkBySlices, SliceSpectData
-from pytorch_lightning.callbacks import ModelCheckpoint, RichProgressBar
+from pytorch_lightning.callbacks import ModelCheckpoint, RichProgressBar, EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.strategies.ddp import DDPStrategy
 
@@ -152,6 +152,11 @@ class CPCLossParams(param.Parameterized):
         doc="If nonzero, an additional loss term is added to the CPC loss after being "
         "scaled by this value which penalizes contrasting averaged representations",
     )
+    prediction_dropout_prob: float = param.Magnitude(
+        0.0,
+        doc="Probability of dropping out a coefficient in the predictor vectors before "
+        "taking the dot product with the latent vectors",
+    )
 
 
 class BestRqLossParams(param.Parameterized):
@@ -257,7 +262,9 @@ class TrainingParams(param.Parameterized):
     learning_rate: float = param.Number(
         2e-4, bounds=(0, None), inclusive_bounds=(False, True), doc="Learning rate"
     )
-    dropout_prob: float = param.Magnitude(0.0, doc="Probability of dropping out a unit")
+    dropout_prob: float = param.Magnitude(
+        0.0, doc="Probability of dropping out a unit in latent/context/prediction nets"
+    )
 
     accumulate_grad_batches: int = param.Integer(
         1,
@@ -306,6 +313,20 @@ class TrainingParams(param.Parameterized):
     )
     max_epochs: int = param.Integer(
         200, bounds=(1, None), doc="The total number of epochs to train for"
+    )
+    early_stopping_threshold: Optional[float] = param.Number(
+        None,
+        bounds=(0.0, None),
+        inclusive_bounds=(False, True),
+        doc="Minimum threshold improvement in val loss which must be achieved after "
+        "no more than early_stopping_patience epochs, or else training will be "
+        "terminated",
+    )
+    early_stopping_patience: int = param.Integer(
+        10,
+        bounds=(1, None),
+        doc="If early_stopping_threshold is set, the number of epochs to wait with no "
+        "improvement before stopping training",
     )
 
     def initialize_missing(self):
@@ -564,6 +585,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
                 params.training.cpc_loss.offset,
                 params.training.cpc_loss.gutted_steps,
                 params.training.cpc_loss.averaging_penalty,
+                params.training.cpc_loss.prediction_dropout_prob,
             )
         elif params.training.loss_type == "best-rq":
             self.register_module("cpc_loss", None)
@@ -936,6 +958,14 @@ def main(args: Optional[Sequence[str]] = None):
     enable_progress_bar = not options.quiet
     if enable_progress_bar:
         callbacks.append(RichProgressBar())
+    if tparams.early_stopping_threshold is not None:
+        callbacks.append(
+            EarlyStopping(
+                "val_loss",
+                tparams.early_stopping_threshold,
+                tparams.early_stopping_patience,
+            )
+        )
     logger_dir = os.path.join(root_dir, "tb_logs")
     os.makedirs(logger_dir, exist_ok=True)
     logger = TensorBoardLogger(logger_dir, model_name, options.version)

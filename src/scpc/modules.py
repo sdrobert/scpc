@@ -958,10 +958,11 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
         negative_samples: int = 128,
         prediction_encoder: Optional[E] = None,
         num_speakers: Optional[int] = None,
-        dropout_prob: float = 0.0,
+        predictor_dropout_prob: float = 0.0,
         offset: int = 0,
         gutted_steps: int = 0,
         averaging_penalty: float = 0.0,
+        prediction_dropout_prob: float = 0.0,
     ) -> None:
         check_positive("latent_size", latent_size)
         if context_size is None:
@@ -970,7 +971,8 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
             check_positive("context_size", context_size)
         check_positive("prediction_steps", prediction_steps)
         check_positive("negative_samples", negative_samples)
-        check_positive("dropout_prob", dropout_prob, True)
+        check_positive("predictor_dropout_prob", predictor_dropout_prob, True)
+        check_positive("prediction_dropout_prob", prediction_dropout_prob, True)
         check_positive("offset", offset, True)
         if num_speakers is not None:
             check_positive("num_speakers", num_speakers)
@@ -983,7 +985,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
                 included_steps * latent_size,
                 "none",
                 False,
-                dropout_prob=dropout_prob,
+                dropout_prob=predictor_dropout_prob,
             )
         else:
             check_is_instance("prediction_encoder", prediction_encoder, Encoder)
@@ -1013,6 +1015,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
             self.register_module("embed", None)
 
         self.prediction_encoder = prediction_encoder
+        self.dropout = torch.nn.Dropout(prediction_dropout_prob)
 
         # self.unfold = torch.nn.Unfold((included_steps, latent_size))
 
@@ -1040,7 +1043,7 @@ class CPCLossNetwork(torch.nn.Module, Generic[E]):
 
         lens_ = None if lens is None else lens.clamp_max(T - K)
         Az = self.prediction_encoder(context[:, : T - K], lens_)[0]  # (N, T - K, Kp* C)
-        Az = Az[:, O:].reshape(N * Tp, Kp, C)
+        Az = self.dropout(Az[:, O:]).reshape(N * Tp, Kp, C)
 
         if lens is None:
             phi_n = latent[:, O:].flatten(end_dim=1)

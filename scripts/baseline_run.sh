@@ -49,8 +49,27 @@ ckpt_final="$bl/final.pt"
 # experiment
 dlf="$em/reps"
 
+N=20
 WIDTHS=( 1 4 16 64 )
-CONDS=( nolm )
+CONDS=( lm nolm )
+with_lm=true
+
+# if [ ! -z "${NOLM:+xxx}" ]; then
+#     echo "Skipping lm condition"
+#     with_lm=false
+# elif which lmplz 2> /dev/null; then
+#     echo "kenlm found. Will add 'lm' condition"
+#     CONDS+=( lm )
+#     with_lm=true
+# else
+#     echo "Cannot find kenlm and env var NOLM was not set. Continuing the"
+#     echo "recipe without the LM will require you to modify the"
+#     echo "recipe/artifacts later. If you're okay with this, define the NOLM"
+#     echo "environment variable and try calling this script again. If you "
+#     echo "already finished the part of the script which compiles with kenlm, "
+#     echo 
+#     exit 1
+# fi
 
 ckpt_pre="$em/best.ckpt"
 if [ ! -f "$ckpt_pre" ]; then
@@ -58,28 +77,47 @@ if [ ! -f "$ckpt_pre" ]; then
     exit 1
 fi
 
-# why the 960hr set if we're only training on clean 100? To ensure we have
-# access to the transcripts of all partitions for LM training
-if [ -z "$libri" ] && [ ! -f "$dl/.960_complete" ]; then
+if [ -z "$libri" ] && [ ! -f "$dl/.bl_complete" ]; then
     libri="$dl/local/data"
-    if [ ! -f "$libri/.960_complete" ]; then
+    if [ ! -f "$libri/.bl_complete" ]; then
         echo "Downloading librispeech"
-        $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[960]}
-        touch "$libri/.960_complete"
+        $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[100]}
+        $with_lm && $cmd_p python prep/librispeech.py "$dl" download \
+                --files librispeech-lm-norm.txt.gz
+        touch "$libri/.bl_complete"
         ((only)) && exit 0
     fi
 fi
 
-# in ./run.sh we don't generate an LM. Using a new file flag ensures we do.
-# Adding the LM shouldn't mess up anything upsteam.
 if [ ! -f "$dl/.bl_complete" ]; then
     echo "Performing common prep of librispeech"
     $cmd_p python prep/librispeech.py "$dl" preamble \
         --speakers-are-readers "$libri"
-    $cmd_p python prep/librispeech.py "$dl" init_char "$libri" \
-        --custom-lm-max-order 10 \
-        --custom-lm-prune-counts 0 0 0 0 0 1 1 1 2 3
+    $cmd_p python prep/librispeech.py "$dl" init_char "$libri"
+    if $with_lm; then
+        find "$(cd "$libri"; pwd -P)" -name 'librispeech-lm-norm.txt.gz' \
+            -exec ln -sf {} "$dl/local/char/" \;
+    fi
     touch "$dl/.bl_complete"
+    ((only)) && exit 0
+fi
+
+if $with_lm && [ ! -f "$dl/local/char/lm.arpa.gz" ]; then
+    echo "Building $N-gram character-level language model"
+    count_dir="$dl/local/char/counts"
+    mkdir -p "$count_dir"
+    if which lmplz 2> /dev/null; then
+        echo "found kenlm (lmplz). Using it to build lm"
+        lm_cmd="lmplz --prune 1 -S 1G"
+    else
+        echo "did not find kenlm (lmplz). Using my dumb ngram_lm.py file"
+        lm_cmd="prep/ngram_lm.py -t 1"
+    fi
+    $cmd_p gunzip -c "$dl/local/char/librispeech-lm-norm.txt.gz" |
+        prep/word2subword.py --both-raw |
+        $lm_cmd -o $N -T "$count_dir" |
+        gzip -c > "$dl/local/char/lm.arpa.gz_"
+    mv "$dl/local/char/lm.arpa.gz"{_,}
     ((only)) && exit 0
 fi
 
