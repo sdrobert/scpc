@@ -317,7 +317,6 @@ class TrainingParams(param.Parameterized):
     early_stopping_threshold: Optional[float] = param.Number(
         None,
         bounds=(0.0, None),
-        inclusive_bounds=(False, True),
         doc="Minimum threshold improvement in val loss which must be achieved after "
         "no more than early_stopping_patience epochs, or else training will be "
         "terminated",
