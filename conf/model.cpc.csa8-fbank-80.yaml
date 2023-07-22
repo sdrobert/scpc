@@ -1,9 +1,9 @@
-name: cpc.trans8
-system_description: "CPC-small but with transfomers and 8-frame window"
+name: cpc.csa8-fbank-80
+system_description: "cpc.csa8 w/ conv stack replaced w/ 80-dim f-fbank"
+input_size: 80
+feat_type: fbank-80
+latent_type: ff
 context_type: csa
-conv:
-  output_size: 256
-  norm_type: channel
 csa:
   max_width: 8
   dim_feedforward: 1024

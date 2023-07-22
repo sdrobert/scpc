@@ -73,55 +73,55 @@ fi
 
 if [ $tr = 100 ]; then
     # special commands only for train-clean-100 training
-    if [ ! -f "$dlf/train_clean_100/ali/.complete" ]; then
-        echo "Moving per-frame alignments to data dir for $ft"
-        rm -f "$dlf/train_clean_100/ali/.complete-"*
-        if [ "$ft" = "raw" ]; then
-            # convert 10ms frame alignments to sample alignments and store the
-            # results in train_clean_100/ali
-            #
-            # N.B. --snip-edges=true for kaldi, which means frames = (samps -
-            #   400) // 160 + 1, or samps <= 160 * (frames - 1) + 400
-            #
-            # since the first frame starts at sample 0, the extra 240 to 399
-            # samples are at the end of the recording. We thus use the
-            # alignment of the final frame for an additional 399 frames, then
-            # crop using get-torch-spect-data-dir-info.
-            align2frames() {
-                awk -v spf=160 -v pad=${FT2PAD[$ft]} -v i=$i -v I=$nproc '
-    (NR + i - 2) % I == 0 {
-    printf "lbi-%s", $1;
-    for (n=2; n <= NF; ++n) for (m=0; m < spf; ++m) printf " %s", $n;
-    for (m=0; m < pad; ++m) printf " %s", $NF;
-    printf "\n";
-    }'
-            }
-        else
-            align2frames() {
-                awk -v i=$i -v I=$nproc '(NR + i - 2) % I == 0 {printf "lbi-"; print;}'
-            }
-        fi
-        for i in $(seq 1 $nproc); do
-            $cmd_p unzip -cq resources/converted_aligned_phones.zip | \
-                align2frames | \
-                write-table-to-torch-dir \
-                    -i iv -o long \
-                    'ark,t,s,o,cs:-' \
-                    "$dlf/train_clean_100/ali" && \
-                touch "$dlf/train_clean_100/ali/.complete-$i" &
-        done
-        wait
-        for i in $(seq 1 $nproc); do
-            if [ ! -f "$dlf/train_clean_100/ali/.complete-$i" ]; then
-                echo -e "Process $i/$I failed!"
-                rm -f "$dlf/train_clean_100/ali/.complete-"*
-                exit 1
-            fi
-        done
-        rm -f "$dlf/train_clean_100/ali/.complete-"*
-        touch "$dlf/train_clean_100/ali/.complete"
-        ((only)) && exit 0
-    fi
+    # if [ ! -f "$dlf/train_clean_100/ali/.complete" ]; then
+    #     echo "Moving per-frame alignments to data dir for $ft"
+    #     rm -f "$dlf/train_clean_100/ali/.complete-"*
+    #     if [ "$ft" = "raw" ]; then
+    #         # convert 10ms frame alignments to sample alignments and store the
+    #         # results in train_clean_100/ali
+    #         #
+    #         # N.B. --snip-edges=true for kaldi, which means frames = (samps -
+    #         #   400) // 160 + 1, or samps <= 160 * (frames - 1) + 400
+    #         #
+    #         # since the first frame starts at sample 0, the extra 240 to 399
+    #         # samples are at the end of the recording. We thus use the
+    #         # alignment of the final frame for an additional 399 frames, then
+    #         # crop using get-torch-spect-data-dir-info.
+    #         align2frames() {
+    #             awk -v spf=160 -v pad=${FT2PAD[$ft]} -v i=$i -v I=$nproc '
+    # (NR + i - 2) % I == 0 {
+    # printf "lbi-%s", $1;
+    # for (n=2; n <= NF; ++n) for (m=0; m < spf; ++m) printf " %s", $n;
+    # for (m=0; m < pad; ++m) printf " %s", $NF;
+    # printf "\n";
+    # }'
+    #         }
+    #     else
+    #         align2frames() {
+    #             awk -v i=$i -v I=$nproc '(NR + i - 2) % I == 0 {printf "lbi-"; print;}'
+    #         }
+    #     fi
+    #     for i in $(seq 1 $nproc); do
+    #         $cmd_p unzip -cq resources/converted_aligned_phones.zip | \
+    #             align2frames | \
+    #             write-table-to-torch-dir \
+    #                 -i iv -o long \
+    #                 'ark,t,s,o,cs:-' \
+    #                 "$dlf/train_clean_100/ali" && \
+    #             touch "$dlf/train_clean_100/ali/.complete-$i" &
+    #     done
+    #     wait
+    #     for i in $(seq 1 $nproc); do
+    #         if [ ! -f "$dlf/train_clean_100/ali/.complete-$i" ]; then
+    #             echo -e "Process $i/$I failed!"
+    #             rm -f "$dlf/train_clean_100/ali/.complete-"*
+    #             exit 1
+    #         fi
+    #     done
+    #     rm -f "$dlf/train_clean_100/ali/.complete-"*
+    #     touch "$dlf/train_clean_100/ali/.complete"
+    #     ((only)) && exit 0
+    # fi
 
     if [ ! -f "$dlf/ext/train_clean_100.info.ark" ]; then
         echo "Fixing alignments and getting info file"
@@ -193,16 +193,16 @@ if [ ! -f "$ckpt" ]; then
     ((only)) && exit 0
 fi
 
-# for pca in "${!PCAS[@]}"; do
-#     pcaf="$em/pca_$pca.pt"
-#     if [ ! -f "$pcaf" ]; then
-#         echo "PCA of dim $pca being performed for $model"
-#         $cmd_p scpc-pca \
-#             --read-yaml conf/pca.yaml --device cuda --num-workers=$nwork \
-#             "$dlf/${tdir}_test_subset" "$ckpt" $pca "$pcaf"
-#         ((only)) && exit 0
-#     fi
-# done
+for pca in "${!PCAS[@]}"; do
+    pcaf="$em/pca_$pca.pt"
+    if [ ! -f "$pcaf" ]; then
+        echo "PCA of dim $pca being performed for $model"
+        $cmd_p scpc-pca \
+            --read-yaml conf/pca.yaml --num-workers=$nwork \
+            "$dlf/${tdir}_test_subset" "$ckpt" $pca "$pcaf"
+        ((only)) && exit 0
+    fi
+done
 
 if $clean; then
     find "$em/" -name '*.ckpt' -not -name 'best.ckpt' -delete

@@ -55,7 +55,12 @@ def main(args: Optional[Sequence[str]] = None):
         help="Whether to store as .npy files",
     )
     parser.add_argument("--audio-suffix", default=".wav", help="Suffix of audio files")
-    parser.add_argument('--device', default=None, type=torch.device, help="What device to compute features on. Defaults to CUDA if available")
+    parser.add_argument(
+        "--device",
+        default=None,
+        type=torch.device,
+        help="What device to compute features on. Defaults to CUDA if available",
+    )
     parser.add_argument(
         "--force-as",
         default=None,
@@ -92,14 +97,14 @@ def main(args: Optional[Sequence[str]] = None):
         if torch.cuda.is_available():
             options.device = torch.device(torch.cuda.current_device())
         else:
-            options.device = torch.device('cpu')
+            options.device = torch.device("cpu")
 
     expert = UpstreamExpert(options.ckpt, options=options).to(options.device)
 
     in_dir = glob.escape(options.in_dir)
     for inf in chain(
         glob.iglob(f"{in_dir}/**/*{options.audio_suffix}"),
-        glob.iglob(f"{in_dir}/*{options.audio_suffix}")
+        glob.iglob(f"{in_dir}/*{options.audio_suffix}"),
     ):
         utt_id = os.path.basename(inf).rsplit(options.audio_suffix, 1)[0]
         signal = sutil.read_signal(inf, dtype=np.float32, force_as=options.force_as)
@@ -118,11 +123,16 @@ def main(args: Optional[Sequence[str]] = None):
         if signal.ndim != 1:
             signal = signal[options.channel]
         signal = torch.from_numpy(signal).to(options.device)
+        if signal.isnan().any():
+            raise ValueError(f"'{inf}' contains NaN values!")
+        assert not signal.isnan().any()
         odir = os.path.join(
             options.out_dir,
             os.path.relpath(os.path.dirname(inf), options.in_dir),
         )
         reps = expert([signal])["hidden_states"][0].cpu()
+        if reps.isnan().any():
+            raise ValueError(f"representation of '{inf}' contains NaN values!")
         os.makedirs(odir, exist_ok=True)
         if options.numpy:
             np.save(os.path.join(odir, utt_id + ".npy"), reps.double().numpy())

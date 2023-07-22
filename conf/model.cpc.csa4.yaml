@@ -1,11 +1,10 @@
-name: cpc.trans128
-system_description: "CPC-small but with transformers and a 128-frame window"
+name: cpc.csa4
+system_description: "CPC-small but with a 4-frame causal transformer layer"
 context_type: csa
 conv:
   output_size: 256
-  norm_type: channel
 csa:
-  max_width: 128
+  max_width: 4
   dim_feedforward: 1024
 training:
   num_devices:

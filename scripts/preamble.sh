@@ -12,7 +12,9 @@ usage () {
         "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"\
         "[-$PCA_FLG {${!PCAS[*]}}]"\
         "[-$MDL_FLG {${!MDLS[*]}}]"\
-        "[-$TSK_FLG {${!STASK2DARG[*]}}]"
+        "[-$TSK_FLG {${!STASK2DARG[*]}}]"\
+        "[-$ORD_FLG NN]"\
+        "[-$VCB_FLG N]"
     if ((ret == 0)); then
         cat << EOF 1>&2
 $help_message
@@ -35,29 +37,35 @@ Options
             (default: downloads into $data/librispeech/local/data)
  -$XTR_FLG      Extra args to pass to trainer (./run.sh only)
  -$PCA_FLG      Number of dimensions to reduce output to.
-            (default: no dim reduction; ./scripts/{zrc,superb}_run.sh only)
+            (default: no dim reduction; ./scripts/{zrc,superb,baseline}_run.sh only)
  -$TSK_FLG      SUPERB task to run
             (default: $stask; ./scripts/superb_run.sh only)
+ -$ORD_FLG      If >0, additionally decode with an n-gram subword lm of this
+            max order (default: $lm_ord; ./scripts/baseline_run.sh only)
+ -$VCB_FLG      The subword vocabulary size (default: $vocab_size;
+            ./scripts/baseline_run.sh only)
 EOF
     fi
     exit "${1:-1}"
 }
 
 # constants
-HLP_FLG=h
-OLY_FLG=o
-SRN_FLG=s
+CLN_FLG=z
 DAT_FLG=d
 EXP_FLG=e
-MDL_FLG=m
-VER_FLG=v
-PRC_FLG=p
-WRK_FLG=w
+HLP_FLG=h
 LIB_FLG=l
-XTR_FLG=x
-PCA_FLG=P
+MDL_FLG=m
+OLY_FLG=o
+ORD_FLG=n
+PCA_FLG=k
+PRC_FLG=p
+SRN_FLG=s
 TSK_FLG=t
-CLN_FLG=z
+VCB_FLG=i
+VER_FLG=v
+WRK_FLG=w
+XTR_FLG=x
 
 DEFT_FT=raw
 declare -A FTS=( [raw]=x [fbank]=x [fbank-80]=x [superb.fbank]=x )
@@ -126,6 +134,8 @@ if [[ "$0" =~ "superb_run.sh" ]]; then
     TR2DESC["superb"]="Consult SUPERB recipe for more information"
 fi
 
+declare BASELINE_CONDS=( lm nolm )
+
 # variables
 data="data"
 exp="exp"
@@ -141,8 +151,10 @@ cmd=
 cmd_p=
 stask=pr
 clean=false
+lm_ord=0
+vocab_size=2000
 
-while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:" opt; do
+while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:${ORD_FLG}:${VCB_FLG}:" opt; do
     case $opt in
         ${HLP_FLG})
             usage 0
@@ -196,23 +208,20 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${M
             argcheck_is_a_choice $opt "${!STASK2DARG[@]}" "$OPTARG"
             stask="$OPTARG"
             ;;
-        *)
+        ${ORD_FLG})
+            argcheck_is_nnint $opt "$OPTARG"
+            lm_ord="$OPTARG"
+            ;;
+        ${VCB_FLG})
+            argcheck_is_nat $opt "$OPTARG"
+            vocab_size="$OPTARG"
+            ;;
+        ?)
+            echo "-$OPTARG is not an option"
             usage
             ;;
     esac
 done
-
-if [[ "$0" =~ "_run.sh" ]] && [ ! -z "$xtra_args" ]; then
-    echo "-$XTR_FLG '$xtra_args' set, but not in ./run.sh; ignoring"
-fi
-
-if [[ ! "$0" =~ "_run.sh" ]] && [ ! -z "$pca" ]; then
-    echo "-$PCA_FLG $pca set, but in ./run.sh; ignoring"
-fi
-
-if [[ ! "$0" =~ "superb_run.sh" ]] && [ "$stask" != "pr" ]; then
-    echo "-$TSK_FLG $stask set, but not in ./scripts/superb_run.sh; ignoring"
-fi
 
 # the first step is always to write the config file to the experiment
 # directory. This way, if the master config file changes, it doesn't muck
@@ -273,11 +282,21 @@ else
         exit 1
     fi
 fi
-rm -f "$a"
 for x in "${!PCAS[@]}"; do
     cat "$em/expert.args.full.txt" <(echo "--pca-file
-$em/pca_$x.pt") > "$em/expert.args.pca_$x.txt"
+$em/pca_$x.pt") > "$a"
+    if [ ! -f "$em/expert.args.pca_$x.txt" ]; then
+        cp "$a" "$em/expert.args.pca_$x.txt"
+    else
+        d="$(diff "$a" "$em/expert.args.pca_$x.txt")"
+        if [ ! -z "$d" ]; then
+            echo "Expected and actual expert arguments differ!"
+            echo "$d"
+            exit 1
+        fi
+    fi
 done
+rm -f "$a"
 
 if [ -z "$pca" ]; then
     expert_config="$em/expert.args.full.txt"

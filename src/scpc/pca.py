@@ -64,9 +64,14 @@ def main(args: Optional[Sequence[str]] = None):
     )
     parser.add_argument("dim", type=_pos_int, help="Dimension to reduce to")
     parser.add_argument("out", help="Where to write PCA V matrix to")
-    parser.add_argument("--device", type=torch.device, default=torch.device("cpu"))
+    parser.add_argument("--device", type=torch.device, default=None)
     parser.add_argument(
         "--num-workers", type=int, default=None, help="Number of workers in datasets"
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
     )
 
     add_serialization_group_to_parser(parser, PCAParams)
@@ -74,12 +79,38 @@ def main(args: Optional[Sequence[str]] = None):
 
     options = parser.parse_args(args)
 
-    dl = SpectDataLoader(
-        options.dir, options.params, shuffle=False, num_workers=options.num_workers
-    )
+    if options.quiet:
+        print_ = lambda x: None
+    else:
+        print_ = print
 
+    if options.device is None:
+        if torch.cuda.is_available():
+            options.device = torch.device(torch.cuda.current_device())
+        else:
+            options.device = torch.device("cpu")
+
+    print_("Loading model...")
     encoder = Encoder.from_checkpoint(options.ckpt).to(options.device)
 
+    print_("Loading dataset...")
+    dl = SpectDataLoader(
+        options.dir,
+        options.params,
+        shuffle=False,
+        num_workers=options.num_workers,
+        pin_memory=options.device.type == "cuda",
+    )
+
+    if not options.quiet:
+        try:
+            from tqdm import tqdm
+
+            dl = tqdm(dl)
+        except ImportError:
+            pass
+
+    print_("Iterating through data to construct matrix...")
     A = []
     for feats, _, feat_sizes, _ in dl:
         feats, feat_sizes = feats.to(options.device), feat_sizes.to(options.device)
@@ -95,14 +126,20 @@ def main(args: Optional[Sequence[str]] = None):
         A.append(reps)
 
     A = torch.cat(A)
+    print_(f"matrix shape {A.shape}")
 
     # A = U diag(S) V^T
     # AV = U diag(S) V^TV
     # AV = U diag(S) (since V is unitary)
     # AV[..., :K] = U diag(S)[..., :K]
+    print_(f"Performing PCA to dim {options.dim}")
     _, _, V = torch.pca_lowrank(A, options.dim)
     assert V.shape == (A.size(1), options.dim)
-    torch.save(V, options.out)
+    if V.isnan().any():
+        raise ValueError("PCA failed! matrix contains NaNs!")
+    print_(f"Performed PCA. Saving...")
+    torch.save(V.cpu(), options.out)
+    print_(f"Saved")
 
 
 if __name__ == "__main__":

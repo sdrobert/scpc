@@ -41,18 +41,26 @@ source scripts/preamble.sh
 dl="$data/librispeech"
 em="$exp/$model/version_$ver"
 bl="$em/baseline"
+
+if [ -z "$pca" ]; then
+  bl="$em/baseline/full_v${vocab_size}"
+  dlf="$em/reps/full"
+else
+  bl="$em/baseline/pca${pca}_v${vocab_size}"
+  dlf="$em/reps/pca${pca}_v${vocab_size}"
+fi
+
 blt="$bl/tuning"
 bld="$bl/decoding"
 ckpt_2kshort="$bl/2kshort.pt"
 ckpt_final="$bl/final.pt"
-# XXX(sdrobert): we save to experiment dir because reps are specific to the
-# experiment
-dlf="$em/reps"
-
-N=20
-WIDTHS=( 1 4 16 64 )
-CONDS=( lm nolm )
-with_lm=true
+local_sw="$dl/local/sw${vocab_size}"
+lm_gz="${local_sw}/lm.$lm_ord.arpa.gz"
+lm_pt="${local_sw}/lm.$lm_ord.pt"
+conds=( nolm )
+if ((lm_ord > 0)); then
+    conds+=( lm.$lm_ord )
+fi
 
 # if [ ! -z "${NOLM:+xxx}" ]; then
 #     echo "Skipping lm condition"
@@ -77,74 +85,129 @@ if [ ! -f "$ckpt_pre" ]; then
     exit 1
 fi
 
-if [ -z "$libri" ] && [ ! -f "$dl/.bl_complete" ]; then
+if [ -z "$libri" ] && [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
     libri="$dl/local/data"
     if [ ! -f "$libri/.bl_complete" ]; then
         echo "Downloading librispeech"
         $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[100]}
         $with_lm && $cmd_p python prep/librispeech.py "$dl" download \
-                --files librispeech-lm-norm.txt.gz
+                --files librispeech-lm-norm.txt.gz --extract-lm-files
         touch "$libri/.bl_complete"
         ((only)) && exit 0
     fi
 fi
 
-if [ ! -f "$dl/.bl_complete" ]; then
+if [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
     echo "Performing common prep of librispeech"
     $cmd_p python prep/librispeech.py "$dl" preamble \
         --speakers-are-readers "$libri"
-    $cmd_p python prep/librispeech.py "$dl" init_char "$libri"
-    if $with_lm; then
-        find "$(cd "$libri"; pwd -P)" -name 'librispeech-lm-norm.txt.gz' \
-            -exec ln -sf {} "$dl/local/char/" \;
-    fi
-    touch "$dl/.bl_complete"
+    $cmd_p python prep/librispeech.py "$dl" init_subword "$libri" \
+        --vocab-size ${vocab_size} --config-subdir "sw${vocab_size}"
+    for x in dev_clean train_clean_100 dev_other test_clean test_other; do
+        ln -sf "${local_sw}/$x.ref"{,.sw${vocab_size}}".trn"
+        $cmd_p prep/subword2word.py "${local_sw}/$x.ref"{,.wrd}".trn"
+    done
+    touch "$dl/.sw${vocab_size}_complete"
     ((only)) && exit 0
 fi
 
-if $with_lm && [ ! -f "$dl/local/char/lm.arpa.gz" ]; then
-    echo "Building $N-gram character-level language model"
-    count_dir="$dl/local/char/counts"
-    mkdir -p "$count_dir"
+if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
+    echo "Building $lm_ord-gram subword-level language model"
+    [ -z "$libri" ] && libri="$dl/local/data"
     if which lmplz 2> /dev/null; then
         echo "found kenlm (lmplz). Using it to build lm"
-        lm_cmd="lmplz --prune 1 -S 1G"
+        lm_cmd="lmplz --prune 0 1 -S 1G -T"
     else
         echo "did not find kenlm (lmplz). Using my dumb ngram_lm.py file"
-        lm_cmd="prep/ngram_lm.py -t 1"
+        lm_cmd="prep/ngram_lm.py -t 0 1 -v -T"
     fi
-    $cmd_p gunzip -c "$dl/local/char/librispeech-lm-norm.txt.gz" |
-        prep/word2subword.py --both-raw |
-        $lm_cmd -o $N -T "$count_dir" |
-        gzip -c > "$dl/local/char/lm.arpa.gz_"
-    mv "$dl/local/char/lm.arpa.gz"{_,}
+    tdata="$(find "$libri" -name "librispeech-lm-norm.txt" | head -n 1)"
+    if [ -z "$tdata" ]; then
+        tdata="$(find "$libri" -name "librispeech-lm-norm.txt.gz" | head -n 1)"
+        if [ -z "$tdata" ]; then
+            echo "Could not find librispeech-lm-norm.txt[.gz] in '$libri'"
+            exit 1
+        fi
+        tdata_cmd=( gunzip -c "$tdata" )
+    else
+        tdata_cmd=( cat "$tdata" )
+    fi
+    # tdata_cmd=( awk '{NF-=1; print}' "${local_sw}/train_clean_100.ref.wrd.trn" )
+    $cmd_p "${tdata_cmd[@]}" |
+        prep/word2subword.py -s "${local_sw}/spm.model" --both-raw |
+        $lm_cmd -o $lm_ord |
+        gzip -c > "${lm_gz}_"
+    gzip -t "${lm_gz}_"
+    mv "${lm_gz}"{_,}
     ((only)) && exit 0
 fi
 
-for x in train_clean_100 dev_clean dev_other test_clean test_other; do
+if ((lm_ord > 0)) && [ ! -f "$lm_pt" ]; then
+    echo "Compiling $lm_ord-gram language model as state dict"
+    $cmd_p prep/arpa-lm-to-state-dict.py \
+        --sos-id -1 --remove-eos --save-sos \
+        "$lm_gz" "${sw_local}/token2id.txt" "$lm_pt" \
+            || (rm -f "$lm_pt" && exit 1)
+    ((only)) && exit 0
+fi
+
+for x in dev_clean train_clean_100 dev_other test_clean test_other; do
   pdir="$dlf/$x"
   if [ ! -f "$pdir/.a2r_complete" ]; then
-    echo "Computing representations in $pdir"
     tmp="$em/tmp/$x"
+    echo "Linking wav files into $tmp"
+    rm -rf "$tmp"
     mkdir -p "$tmp" "$pdir/feat"
-    cat "$dl/local/char/$x.wav.scp" | xargs -P $nwork -I {} bash -c '
-ln -sf "${1#* }" "${1%% *}.flac" ' -- "$tmp/"{}
-    $cmd_p scpc-a2r $expert_args --audio-suffix .flac \
-        "$tmp" "$ckpt_pre" "$pdir/feat"
+    wav_num="$(cat "${local_sw}/$x.wav.scp"| wc -l)"
+    lines_per_proc="$(( (wav_num + nproc - 1) / nproc ))"
+
+    split -dl "$lines_per_proc" "${local_sw}/$x.wav.scp" "$tmp/wav.scp"
+    split_num="$(cat "$tmp/wav.scp"* | wc -l)"
+    if [ "$wav_num" != "$split_num" ]; then
+        echo "Expected $wav_num utts in $tmp/wav.scp*; got $split_num"
+        exit 1
+    fi
+
+    for f in "$tmp/wav.scp"*; do
+        stmp="$tmp/${f##*scp}"
+        mkdir -p "$stmp"
+        $cmd_p awk -v tmp="$stmp" '{print $2,tmp"/"$1".flac"}' "$f" |
+            xargs -P $nwork -I % bash -c 'ln -sf $1' -- %
+    done
+    tmp_num="$(find "$tmp" -name '*.flac' | wc -l)"
+    if [ "$wav_num" != "$tmp_num" ]; then
+        echo "Expected $wav_num utts in $tmp; got $tmp_num"
+        exit 1
+    fi
+
+    echo "Computing representations in $pdir"
+    for f in "$tmp/wav.scp"*; do
+        stmp="$tmp/${f##*scp}"
+        $cmd_p scpc-a2r $expert_args --audio-suffix .flac \
+            "$stmp" "$ckpt_pre" "$pdir/feat" && touch "$stmp/.complete" &
+    done
+    
+    wait
+    for f in "$tmp/wav.scp"*; do
+        stmp="$tmp/${f##*scp}"
+        if [ ! -f "$stmp/.complete" ]; then
+            echo "${f##*scp} failed!"
+            exit 1
+        fi
+    done
+
     touch "$pdir/.a2r_complete"
+    rm -rf "$tmp"
     ((only)) && exit 0
   fi
-  rm -rf "$em/tmp"
 done
 
 if [ ! -f "$dlf/.complete" ]; then
     echo "Converting into SpectDataSet"
     ln -sf "$(cd "$dl/local"; pwd -P)" "$dlf/../local"
     $cmd_p python prep/librispeech.py \
-        "$dlf/.." torch_dir char reps --feats-from reps ${TR2TD_ARGS[100]}
-    $cmd_p prep/arpa-lm-to-state-dict.py \
-        --save-sos \
-        "$dlf/ext/"{lm.arpa.gz,token2id.txt,lm.pt}
+        "$dlf/.." torch_dir sw${vocab_size} $(basename "$dlf") \
+            --feats-from $(basename "$dlf") ${TR2TD_ARGS[100]}
     $cmd_p compute-mvn-stats-for-torch-feat-data-dir \
         --num-workers $nwork \
         "$dlf/train_clean_100/feat" "$dlf/ext/mvn.pt"
@@ -158,11 +221,15 @@ for x in model data 2kshort-training training; do
     if [ ! -f "$f" ]; then
         echo "Writing $f"
         mkdir -p "$bl"
-        export delta_order=0
-        export input_size="$(scpc-info $expert_args "$ckpt_pre" | awk -v d=$delta_order '$1 == "output_size" {print $2 * (1 + d)}')"
-        export vocab_size="$(awk -v v=0 '{if ($1 > v) v=$1} END {print v + 1}' "$dlf/ext/id2token.txt")"
-        export eos="$(awk '$2 == "</s>" {print $1}' "$dlf/ext/id2token.txt")"
-        cat "conf/baseline.$x.template.yaml" | envsubst > "$f"
+        (
+            if [ -z "$pca" ]; then
+                export input_size="$(scpc-info $expert_args "$ckpt_pre" | awk '$1 == "output_size" {print $2}')"
+            else
+                export input_size="$pca"
+            fi
+            export vocab_size
+            cat "conf/baseline.$x.template.yaml" | envsubst > "$f"
+        )
         ((only)) && exit 0
     fi
 done
@@ -214,7 +281,7 @@ if [ ! -f "$ckpt_final" ]; then
             $xtra_args "$dlf/"{train_clean_100,dev_clean} "$ckpt_final"
     if $clean; then
         rm -rf "$state_dir"
-        for x in "$dlf/train_*"; do
+        for x in "$dlf/train_"*; do
             find "$x" -name 'lbi-*.pt' -delete
         done
     fi
@@ -223,52 +290,42 @@ fi
 
 rem=$nproc
 for width in "${WIDTHS[@]}"; do
-    for cond in "${CONDS[@]}"; do
+    for cond in "${conds[@]}"; do
         Tdir="$blt/${cond}_b${width}"
         if [ ! -f "$Tdir/.complete" ]; then
             mkdir -p "$Tdir"
             echo "Checking $cond with beam width $width"
-            if [ "$cond" = "lm" ]; then
-                beta=0.5
-            else
-                beta=0
-            fi
-            find "$Tdir/" -name 'lbi-*.pt' -delete
-            cat << EOF > "$Tdir/decode.args.txt"
+            if [ "$cond" = nolm ]; then
+                cat << EOF > "$Tdir/decode.args.txt"
 --beam-width
 $width
---beta
-$beta
 EOF
+            else
+                cat << EOF > "$Tdir/decode.args.txt"
+--beam-width
+$width
+--lookup-lm-state-dict
+$lm_pt
+--beta
+0.5
+EOF
+            fi
             $cmd_p prep/asr_baseline.py \
                 --read-model-yaml "$bl/model.yaml" \
                 --mvn-path "$dlf/ext/mvn.pt" \
                 decode \
                     "@$Tdir/decode.args.txt" \
-                    --lookup-lm-state-dict "$dlf/ext/lm.pt" \
                     --read-data-yaml "$bl/data.yaml" \
                     --max-hyp-len 500 \
-                    "$ckpt_final" "$dlf/dev_clean" $Tdir && \
-                touch "$Tdir/.complete" &
-            rem=$(($rem - 1))
-            if [ $rem = 0 ]; then
-                declare -i err=0 werr=0
-                while wait -n || werr=$?; ((werr != 127)); do
-                    err=$werr
-                done
-                if [ $err -ne 0 ]; then
-                    echo "Decoding failed!"
-                    exit 1
-                fi
-                ((only)) && exit 0
-                rem=$nproc
-            fi
+                    "$ckpt_final" "$dlf/dev_clean" $Tdir
+            touch "$Tdir/.complete"
+            ((only)) && exit 0
         fi
     done
 done
 
 for width in "${WIDTHS[@]}"; do
-    for cond in "${CONDS[@]}"; do
+    for cond in "${conds[@]}"; do
         Tdir="$blt/${cond}_b${width}"
         if [ ! -f "$Tdir/score.txt" ]; then
             $cmd_p compute-torch-token-data-dir-error-rates \
@@ -281,7 +338,7 @@ for width in "${WIDTHS[@]}"; do
     done
 done
 
-for cond in "${CONDS[@]}"; do
+for cond in "${conds[@]}"; do
     if [ ! -f "$bl/$cond-tuned.decode.args.txt" ]; then
         best_er=1000
         best_args=DEADBEEF
@@ -301,7 +358,7 @@ done
 rem=$nproc
 for x in dev_clean dev_other test_clean test_other; do
     src="$dlf/$x"
-    for y in "${CONDS[@]}"; do
+    for y in "${conds[@]}"; do
         dst="$bld/$x/$y"
         if [ ! -f "$dst/.complete" ]; then
             mkdir -p "$dst"
@@ -311,54 +368,50 @@ for x in dev_clean dev_other test_clean test_other; do
                 --mvn-path "$dlf/ext/mvn.pt" \
                 decode \
                     "@$bl/$y-tuned.decode.args.txt" \
-                    --lookup-lm-state-dict "$dlf/ext/lm.pt" \
                     --read-data-yaml "$bl/data.yaml" \
                     --max-hyp-len 500 \
-                    "$ckpt_final" "$src" "$dst" && \
-                touch "$dst/.complete" &
-            rem=$(($rem - 1))
-            if [ $rem = 0 ]; then
-                declare -i err=0 werr=0
-                while wait -n || werr=$?; ((werr != 127)); do
-                    err=$werr
-                done
-                if [ $err -ne 0 ]; then
-                    echo "Decoding failed!"
-                    exit 1
-                fi
-                ((only)) && exit 0
-                rem=$nproc
-            fi
+                    "$ckpt_final" "$src" "$dst"
+            touch "$dst/.complete"
+            ((only)) && exit 0
         fi
     done
 done
 
-set -x
 for x in dev_clean dev_other test_clean test_other; do
-    echo "Computing final error rates for $x..."
-    if [ ! -f "$bld/scores.$x.txt" ]; then
-        cp -f "$dlf/ext/$x.ref.trn" "$bld/$x.ref.chr.trn"
-        $cmd_p prep/subword2word.py "$bld/$x.ref."{chr,wrd}".trn"
-        for y in "${CONDS[@]}"; do
+    for y in "${conds[@]}"; do
+        if [ ! -f "$bld/$x.hyp.wrd.$y.trn" ]; then
+            echo "Creating transcriptions of $x with $y"
             $cmd_p torch-token-data-dir-to-trn \
                 --num-workers $nwork \
-                "$bld/$x/$y" "$dlf/ext/id2token.txt" "$bld/$x.hyp.chr.$y.trn"
-            $cmd_p prep/subword2word.py "$bld/$x.hyp."{chr,wrd}".$y.trn"
-        done
-        for y in chr wrd; do
-            prep/error-rates-from-trn.py --suppress-warning \
-                "$bld/$x.ref.$y.trn" "$bld/$x.hyp.$y."*.trn \
-                > "$bld/scores.$x.$y.txt"
-        done
-        cat "$bld/scores.$x."*.txt > "$bld/scores.$x.txt"
-        $clean && find "$dlf/" -name 'lbi-*.pt' -delete
-        ((only)) && exit 0
-    fi
+                "$bld/$x/$y" "$dlf/ext/id2token.txt" \
+                "$bld/$x.hyp.sw${vocab_size}.$y.trn"
+            $cmd_p prep/subword2word.py \
+                "$bld/$x.hyp."{sw${vocab_size},wrd}".$y.trn"
+            $clean && find "$bld/$x/$y" -name 'lbi-*.pt' -delete
+            ((only)) && exit 1
+        fi
+    done
 done
 
 if $clean; then
     rm -rf "$bl/states_"*
-    find "$dlf/" -name 'lbi-*.pt' -delete
+    for x in "$dlf" "$blt" "$bld"; do
+        find "$x/" -name 'lbi-*.pt' -delete
+    done
 fi
 
-cat "$bld/scores."{dev_clean,dev_other,test_clean,test_other}.txt
+echo "-----------------------------------------------"
+echo "Subword error rates with vocab size $vocab_size"
+for x in dev_clean dev_other test_clean test_other; do
+    prep/error-rates-from-trn.py --suppress-warning \
+        "${sw_local}/$x.ref.sw${vocab_size}.trn" \
+        "$bld/$x.hyp.sw${vocab_size}."*.trn
+done
+
+echo ""
+echo "Word error rates"
+for x in dev_clean dev_other test_clean test_other; do
+    prep/error-rates-from-trn.py --suppress-warning \
+        "${sw_local}/$x.ref.wrd.trn" \
+        "$bld/$x.hyp.wrd."*.trn
+done

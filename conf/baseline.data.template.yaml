@@ -1,7 +1,5 @@
 batch_size: 32  # Number of elements in a batch.
-drop_last: true # Whether to drop a batch when there are too few samples to match its size.
-eos: ${eos} # A special symbol used to indicate the end of a sequence in reference and hypothesis transcriptions. If set, `eos` will be appended to every reference transcription on read
-delta_order: ${delta_order} # Order of delta coefficients to apply to the spectral features. 0 means none
-do_mvn: false # Whether to perform mean-variance normalization on the spectral features. If mean and variance statistics are not passed to the dataset/dataloader as an argument, feature coefficients will be unit normalized per utterance
-size_batch_by_length: true
-num_length_buckets: 10
+# drop_last: true # Whether to drop a batch when there are too few samples to match its size
+do_mvn: true
+# size_batch_by_length: true
+# num_length_buckets: 10

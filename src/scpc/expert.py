@@ -157,7 +157,7 @@ class UpstreamExpert(torch.nn.Module):
                 f"{self.encoder.input_size}"
             )
         if options.pca_file is not None:
-            W = torch.load(options.pca_file)
+            W = torch.load(options.pca_file, "cpu")
             if W.ndim != 2 or self.encoder.output_size != W.size(0):
                 raise ValueError(
                     "Expected --pca-file to contain matrix of shape ("
@@ -179,6 +179,7 @@ class UpstreamExpert(torch.nn.Module):
         if len(wavs) == 0:
             return {"hidden_states": torch.empty(0, 0, self.encoder.output_size)}
         feats = [self.feat_extractor(x) for x in wavs]
+        assert len(feats) == 1
         lens = torch.tensor([f.size(0) for f in feats]).to(wavs[0].device)
         x = torch.nn.utils.rnn.pad_sequence(feats, batch_first=True)
         x, lens = self.encoder(x, lens)

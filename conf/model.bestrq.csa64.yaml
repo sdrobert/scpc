@@ -1,0 +1,27 @@
+name: bestrq.csa64
+system_description: BEST-RQ + cpc.csa64-fbank-80
+feat_type: fbank-80
+train_part: '100'
+input_size: 80
+latent_type: ff
+context_type: csa
+ff:
+  output_size: 256
+csa:
+  dim_feedforward: 1024
+  max_width: 64
+training:
+  num_devices:
+  accumulate_grad_batches: 3
+  max_epochs: 1000
+  early_stopping_threshold: 0.01
+  data:
+    common:
+      batch_size: 4
+  loss-type: best-rq
+  best_rq_loss:
+    prediction_type: ff
+  chunking:
+    policy: none
+    # lobe_size: 81916
+    max_chunks:

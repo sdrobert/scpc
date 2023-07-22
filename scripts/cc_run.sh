@@ -26,7 +26,7 @@ if [ -f "$1" ]; then
   shift
 fi
 
-"$script" -s -p "$P" -w "$W" -x "--quiet" "$@"
+"$script" -zs -p "$P" -w "$W" -x "--quiet" "$@"
 r=$?
 sleep 5
 scancel --state=PENDING "${SLURM_ARRAY_JOB_ID}"
