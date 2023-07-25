@@ -6,44 +6,48 @@ source scripts/utils.sh
 
 usage () {
     local ret="${1:-1}"
-    IFS="," echo -e "Usage: $0 [-${HLP_FLG}] [-${OLY_FLG}] [-${SRN_FLG}]" \
+    echo -e "Usage: $0 [-${HLP_FLG}] [-${OLY_FLG}] [-${SRN_FLG}]" \
         "[-$CLN_FLG] [-$DAT_FLG DIR]" \
         "[-$EXP_FLG DIR] [-$VER_FLG I] [-$PRC_FLG N]"\
         "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"\
-        "[-$PCA_FLG {${!PCAS[*]}}]"\
-        "[-$MDL_FLG {${!MDLS[*]}}]"\
-        "[-$TSK_FLG {${!STASK2DARG[*]}}]"\
+        "[-$PCA_FLG $(print_arg_choices "${!PCAS[@]}")]"\
+        "[-$MDL_FLG $(print_arg_choices "${!MDLS[@]}")]"\
+        "[-$TSK_FLG $(print_arg_choices "${!STASK2DARG[@]}")]"\
         "[-$ORD_FLG NN]"\
         "[-$VCB_FLG N]"
     if ((ret == 0)); then
         cat << EOF 1>&2
+
 $help_message
 
 Options
  -$HLP_FLG      Display this message and exit
  -$OLY_FLG      Perform only one step and return
  -$SRN_FLG      Prefix work-heavy commands with "srun" (i.e. when running
-            nested in an sbatch command)
+         nested in an sbatch command)
  -$CLN_FLG      If set, intermediary files will be deleted once they are no
-            longer necessary
+         longer necessary
  -$DAT_FLG      Root data directory (default: $data)
  -$EXP_FLG      Root experiment directory (defalt: $exp)
- -$MDL_FLG      Model to train/evaluate (default: $model)
+ -$MDL_FLG*     Model to train/evaluate (default: $model)
  -$VER_FLG      Non-negative integer version number (default: $ver)
  -$PRC_FLG      Number of processes to spawn in multi-threaded task
-            (default: $nproc)
+         (default: $nproc)
  -$WRK_FLG      Number of workers per process
  -$LIB_FLG      Directory of where librispeech has been downloaded
-            (default: downloads into $data/librispeech/local/data)
+         (default: downloads into $data/librispeech/local/data)
  -$XTR_FLG      Extra args to pass to trainer (./run.sh only)
  -$PCA_FLG      Number of dimensions to reduce output to.
-            (default: no dim reduction; ./scripts/{zrc,superb,baseline}_run.sh only)
+         (default: no dim reduction; ./scripts/{zrc,superb,baseline}_run.sh only)
  -$TSK_FLG      SUPERB task to run
-            (default: $stask; ./scripts/superb_run.sh only)
+         (default: $stask; ./scripts/superb_run.sh only)
  -$ORD_FLG      If >0, additionally decode with an n-gram subword lm of this
-            max order (default: $lm_ord; ./scripts/baseline_run.sh only)
+         max order (default: $lm_ord; ./scripts/baseline_run.sh only)
  -$VCB_FLG      The subword vocabulary size (default: $vocab_size;
-            ./scripts/baseline_run.sh only)
+         ./scripts/baseline_run.sh only)
+
+*-$MDL_FLG accepts models not in the list (i.e. not in conf/model.*.yaml or
+not valid) if the model/version pair already exists in the experiment directory
 EOF
     fi
     exit "${1:-1}"
@@ -178,7 +182,7 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${M
             exp="$OPTARG"
             ;;
         ${MDL_FLG})
-            argcheck_is_a_choice $opt "${!MDLS[@]}" "$OPTARG"
+            argcheck_is_basename $opt "$OPTARG"
             model="$OPTARG"
             ;;
         ${VER_FLG})
@@ -229,6 +233,10 @@ done
 em="$exp/$model/version_$ver"
 cfg="$em/model.yaml"
 if [ ! -f "$cfg" ]; then
+    if [ -z "${MDLS[$model]}" ]; then
+        echo "Cannot create new model '$model': conf/model.$model.yaml does not exist or is not valid"
+        exit 1
+    fi
     mkdir -p "$em"
     if [[ "$model" =~ ^superb ]]; then
         cat <<EOF > "$cfg"
@@ -310,3 +318,4 @@ darg="${STASK2DARG[$stask]}"
 echo "cmd: $0 $*"
 echo "system description: $system_description ($model)"
 echo "training set: $train_description ($tr)"
+echo "version: $ver"

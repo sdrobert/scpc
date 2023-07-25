@@ -27,6 +27,7 @@ fi
 set -e
 
 # command-line option parsing
+help_message="Score pre-trained speech reps with ZeroSpeech's libriABX task"
 source scripts/preamble.sh
 
 dz="$data/zerospeech"

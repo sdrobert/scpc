@@ -36,6 +36,7 @@ if ! pip freeze | grep 'scpc' --quiet; then
 fi
 
 # command-line option parsing
+help_message="Train/decode baseline ASR model on pre-trained speech reps"
 source scripts/preamble.sh
 
 dl="$data/librispeech"

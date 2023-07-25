@@ -1,12 +1,26 @@
 #! /usr/bin/env bash
 
+# Copyright 2023 Sean Robertson
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Utility functions
 # 
 # This script should be sourced in whatever script wants to use these functions
-
-# XXX(sdrobert): we design functions to be composed on the left and arguments
-# to be composed on the right. This can get counterintuitive, e.g. in
-# "is_a_match", but allows us to do things like
+#
+# We design functions to be composed on the left and arguments to be composed
+# on the right. This can get counterintuitive, e.g. in "is_a_match", but allows
+# us to do things like
 # 
 #   seq 1 20 | filter is_not is_a_match 1
 # 
@@ -35,6 +49,12 @@ is_rw() [[ -r "$1" && -w "$1" ]]
 
 # is the argument a file?
 is_file() [[ -f "$1" ]]
+
+# is the entire argument alphanumeric?
+is_alphanum() [[ "$1" =~ ^[A-Za-z0-9]+$ ]]
+
+# is the argument a posix-compliant basename?
+is_basename() [[ "$1" =~ ^[-._A-Za-z0-9]+$ ]]
 
 # is the second argument equal to the first?
 is_equal() [[ "$1" = "$2" ]]
@@ -138,6 +158,8 @@ argcheck_is_rw() { _argcheck_is "is either not readable or not writable" "$@" is
 argcheck_is_file() { _argcheck_is "is not a file" "$@" is_file; }
 argcheck_is_a_choice() { _argcheck_is "is not in choices '${*:2:$#-2}'" "$@" is_a_choice; }
 argcheck_is_a_match() { _argcheck_is "does not match any of '${*:2:$#-2}'" "$@" is_a_match; }
+argcheck_is_alphanum() { _argcheck_is "is not alphanumeric" "$@" is_alphanum; }
+argcheck_is_basename() { _argcheck_is "is not a basename" "$@" is_basename; }
 
 _argcheck_all() {
   local cmd="${!#}"
@@ -162,3 +184,16 @@ argcheck_all_readable() { _argcheck_all "is not readable" "$@" is_readable; }
 argcheck_all_file() { _argcheck_all "is not a file" "$@" is_file; }
 argcheck_all_a_choice() { _argcheck_all "is not in choices '${*:2:$#-2}'" "$@" is_a_choice; }
 argcheck_all_a_match() { _argcheck_all "does not match any of '${*:2:$#-2}'" "$@" is_a_match; }
+argcheck_all_alphanum() { _argcheck_all "is not alphanumeric" "$@" is_alphanum; }
+argcheck_all_basename() { _argcheck_all "is not a basename" "$@" is_basename; }
+
+
+print_arg_choices() {
+  echo -n "("
+  while [ $# -gt 1 ]; do
+    echo -n "$1|"
+    shift
+  done
+  [ $# = 1 ] && echo -n "$1"
+  echo ")"
+}

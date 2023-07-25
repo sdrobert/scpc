@@ -36,6 +36,7 @@ if ! pip freeze | grep 'scpc' --quiet; then
 fi
 
 # command-line option parsing
+help_message="Pre-train speech rep model"
 source scripts/preamble.sh
 
 dl="$data/librispeech"
