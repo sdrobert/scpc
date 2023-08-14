@@ -23,7 +23,7 @@ for arg in "$@"; do
   fi
 done
 
-a=( "./scripts/preamble.sh" )
+a=( "${RUN_CMD:-./scripts/preamble.sh}" )
 for flag in "${!flag2vals[@]}"; do
   b=()
   for val in ${flag2vals[${flag}]}; do
