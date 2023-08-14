@@ -3,20 +3,18 @@ system_description: "CPC-small but with a 4-frame causal transformer layer"
 context_type: csa
 conv:
   output_size: 256
+  norm_type: channel
 csa:
   max_width: 4
   dim_feedforward: 1024
 training:
   num_devices:
   accumulate_grad_batches: 3
-  max_epochs: 1000
+  max_epochs: 200
   data:
     common:
       batch_size: 4
   cpc_loss:
-    prediction_type: ff
-    prediction_dropout_prob: 0.0
+    prediction_type: csa
   chunking:
     policy: none
-    # lobe_size: 81916
-    max_chunks:

@@ -1,5 +1,5 @@
 name: cpc.csa8
-system_description: "CPC-small but with an 8-frame causal transformer layer"
+system_description: "CPC-small but with a 8-frame causal transformer layer"
 context_type: csa
 conv:
   output_size: 256
@@ -10,14 +10,11 @@ csa:
 training:
   num_devices:
   accumulate_grad_batches: 3
-  max_epochs: 1000
+  max_epochs: 200
   data:
     common:
       batch_size: 4
   cpc_loss:
-    prediction_type: ff
-    prediction_dropout_prob: 0.0
+    prediction_type: csa
   chunking:
     policy: none
-    # lobe_size: 81916
-    max_chunks:
