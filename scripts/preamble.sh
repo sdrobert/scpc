@@ -283,7 +283,7 @@ echo "${FT2TD_ARGS[$ft]}" | tr ' ' '\n' > "$a"
 if [ ! -f "$em/expert.args.full.txt" ]; then
     cp "$a" "$em/expert.args.full.txt"
 else
-    d="$(diff "$a" "$em/expert.args.full.txt")"
+    d="$(diff "$a" "$em/expert.args.full.txt" || true)"
     if [ ! -z "$d" ]; then
         echo "Expected and actual expert arguments differ!"
         echo "$d"
@@ -296,7 +296,7 @@ $em/pca_$x.pt") > "$a"
     if [ ! -f "$em/expert.args.pca_$x.txt" ]; then
         cp "$a" "$em/expert.args.pca_$x.txt"
     else
-        d="$(diff "$a" "$em/expert.args.pca_$x.txt")"
+        d="$(diff "$a" "$em/expert.args.pca_$x.txt" || true)"
         if [ ! -z "$d" ]; then
             echo "Expected and actual expert arguments differ!"
             echo "$d"

@@ -56,6 +56,7 @@ bld="$bl/decoding"
 ckpt_2kshort="$bl/2kshort.pt"
 ckpt_final="$bl/final.pt"
 local_sw="$dl/local/sw${vocab_size}"
+lm_train_gz="${local_sw}/librispeech-lm-norm-subword.txt.gz"
 lm_gz="${local_sw}/lm.$lm_ord.arpa.gz"
 lm_pt="${local_sw}/lm.$lm_ord.pt"
 conds=( nolm )
@@ -92,7 +93,7 @@ if [ -z "$libri" ] && [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
         echo "Downloading librispeech"
         $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[100]}
         $with_lm && $cmd_p python prep/librispeech.py "$dl" download \
-                --files librispeech-lm-norm.txt.gz --extract-lm-files
+                --files librispeech-lm-norm.txt.gz
         touch "$libri/.bl_complete"
         ((only)) && exit 0
     fi
@@ -112,16 +113,9 @@ if [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
     ((only)) && exit 0
 fi
 
-if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
-    echo "Building $lm_ord-gram subword-level language model"
+if ((lm_ord > 0)) && [ ! -f "$lm_train_gz" ]; then
+    echo "Constructing subword LM training file"
     [ -z "$libri" ] && libri="$dl/local/data"
-    if which lmplz 2> /dev/null; then
-        echo "found kenlm (lmplz). Using it to build lm"
-        lm_cmd="lmplz --prune 0 1 -S 1G -T"
-    else
-        echo "did not find kenlm (lmplz). Using my dumb ngram_lm.py file"
-        lm_cmd="prep/ngram_lm.py -t 0 1 -v -T"
-    fi
     tdata="$(find "$libri" -name "librispeech-lm-norm.txt" | head -n 1)"
     if [ -z "$tdata" ]; then
         tdata="$(find "$libri" -name "librispeech-lm-norm.txt.gz" | head -n 1)"
@@ -133,12 +127,36 @@ if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
     else
         tdata_cmd=( cat "$tdata" )
     fi
-    # tdata_cmd=( awk '{NF-=1; print}' "${local_sw}/train_clean_100.ref.wrd.trn" )
     $cmd_p "${tdata_cmd[@]}" |
         prep/word2subword.py -s "${local_sw}/spm.model" --both-raw |
-        $lm_cmd -o $lm_ord |
-        gzip -c > "${lm_gz}_"
-    gzip -t "${lm_gz}_"
+        gzip -c > "${lm_train_gz}_"
+    gzip -t "${lm_train_gz}_" || (rm -f "${lm_train_gz}_" && exit 1)
+    mv "${lm_train_gz}"{_,}
+    ((only)) && exit 0
+fi
+
+if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
+    echo "Building $lm_ord-gram subword-level language model"
+    [ -z "$libri" ] && libri="$dl/local/data"
+    if which lmplz 2> /dev/null; then
+        echo "found kenlm (lmplz). Using it to build lm"
+        lm_cmd="lmplz -S 8G --discount_fallback 0.5 1.0 1.5 --prune"
+    else
+        echo "did not find kenlm (lmplz). Using my dumb ngram_lm.py file"
+        lm_cmd="prep/ngram_lm.py -T -v -t"
+    fi
+    if [ $lm_ord = 1 ]; then
+        prunes="0"
+    else
+        prunes="0 1"
+    fi
+    $cmd_p $lm_cmd $prunes -o $lm_ord < "$lm_train_gz" |
+        gzip -c > "${lm_gz}_" 
+    if [ $(gunzip -c "${lm_gz}_" 2> /dev/null | head -n 1 | wc -l) != 1 ]; then
+        echo "n-gram lm creation failed!"
+        rm -f "${lm_gz}_"
+        exit 1
+    fi
     mv "${lm_gz}"{_,}
     ((only)) && exit 0
 fi
@@ -146,8 +164,8 @@ fi
 if ((lm_ord > 0)) && [ ! -f "$lm_pt" ]; then
     echo "Compiling $lm_ord-gram language model as state dict"
     $cmd_p prep/arpa-lm-to-state-dict.py \
-        --sos-id -1 --remove-eos --save-sos \
-        "$lm_gz" "${sw_local}/token2id.txt" "$lm_pt" \
+        --sos-id -1 --save-sos --on-extra drop -v \
+        "$lm_gz" "${local_sw}/token2id.txt" "$lm_pt" \
             || (rm -f "$lm_pt" && exit 1)
     ((only)) && exit 0
 fi
