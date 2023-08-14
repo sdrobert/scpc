@@ -178,9 +178,7 @@ class BestRqLossParams(param.Parameterized):
         8192, bounds=(1, None), doc="Number of quantized vectors in codebook"
     )
     codebook_dim: int = param.Integer(
-        16,
-        bounds=(1, None),
-        doc="Size of quantized vector in codebook",
+        16, bounds=(1, None), doc="Size of quantized vector in codebook",
     )
     num_speakers: Optional[int] = param.Integer(
         None,
@@ -761,8 +759,13 @@ class LightningPretrainedFrontend(pl.LightningModule):
 
     def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         loss = self.pretrain_step(batch, batch_idx)
-        # don't incur the overhead
-        self.log("train_loss", loss, batch_size=batch[0].size(0), sync_dist=False)
+        # self.log(
+        #     "train_loss",
+        #     loss,
+        #     batch_size=batch[0].size(0),
+        #     sync_dist=False,
+        #     rank_zero_only=True,
+        # )
         return loss
 
     def validation_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
@@ -816,9 +819,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
         return feats, None, None, feat_sizes, None, utt_ids
 
     def forward(
-        self,
-        feats: torch.Tensor,
-        feat_lens: Optional[torch.Tensor] = None,
+        self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         return self.get_inference_model().forward(feats, feat_lens)
 
@@ -853,11 +854,7 @@ class LightningPretrainedFrontend(pl.LightningModule):
             )
 
         grp = pargparse.add_deserialization_group_to_parser(
-            parser,
-            params,
-            "params",
-            reckless=True,
-            flag_format_str=read_format_str,
+            parser, params, "params", reckless=True, flag_format_str=read_format_str,
         )
         return grp
 
@@ -885,7 +882,6 @@ def main(args: Optional[Sequence[str]] = None):
     )
     parser.add_argument(
         "--version",
-        type=int,
         default=None,
         help="What version/run of this model to perform/continue",
     )
@@ -898,10 +894,7 @@ def main(args: Optional[Sequence[str]] = None):
         "--num-workers", type=int, default=None, help="Number of workers in datasets"
     )
     parser.add_argument(
-        "--quiet",
-        action="store_true",
-        default=False,
-        help="Suppress progress bar",
+        "--quiet", action="store_true", default=False, help="Suppress progress bar",
     )
     parser.add_argument(
         "--root-dir",
@@ -967,7 +960,7 @@ def main(args: Optional[Sequence[str]] = None):
         )
     logger_dir = os.path.join(root_dir, "tb_logs")
     os.makedirs(logger_dir, exist_ok=True)
-    logger = TensorBoardLogger(logger_dir, model_name, options.version)
+    logger = TensorBoardLogger(logger_dir, model_name, f"version_{options.version}")
     if tparams.num_devices:
         strategy = DDPStrategy(find_unused_parameters=False)
     else:
