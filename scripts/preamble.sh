@@ -108,7 +108,7 @@ declare -A TR2TDIR=(
 declare -A MDLS
 for f in conf/model.*.yaml; do
     exp_name="${f:11:-5}"
-    act_name="$(cat "$f" | tr -d '\r' | awk '$1 == "name:" {print $2}')"
+    act_name="$(cat "$f" | tr -d '\r' | awk '/^name:/ {print $2}')"
     if [ "$exp_name" != "$act_name" ]; then
         echo -e "expected name: in '$f' to be '$exp_name'; got '$act_name';" \
             " ignoring as possible model"
