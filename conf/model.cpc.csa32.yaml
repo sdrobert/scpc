@@ -3,7 +3,7 @@ system_description: "CPC-small but with a 32-frame causal transformer layer"
 context_type: csa
 conv:
   output_size: 256
-  norm_type: channel
+  norm_type: none
 csa:
   max_width: 32
   dim_feedforward: 1024

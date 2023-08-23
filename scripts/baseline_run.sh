@@ -167,6 +167,18 @@ if ((lm_ord > 0)) && [ ! -f "$lm_pt" ]; then
         --sos-id -1 --save-sos --on-extra drop -v \
         "$lm_gz" "${local_sw}/token2id.txt" "$lm_pt" \
             || (rm -f "$lm_pt" && exit 1)
+    
+    # N.B. If you want to evaluate the LM in terms of perplexity, you can use
+    # the lookup-lm-corpus-perplexity.py script, e.g.
+    #
+    # awk '{NF-=1; print}' "${local_sw}/dev_clean.ref.trn" > dev_clean.txt
+    # prep/lookup-lm-corpus-perplexity.py \
+    #   --states-and-token2id "${lm_pt}" "${local_sw}/token2id" \
+    #   --chunk-size 64 \
+    #   dev_clean.txt
+    #
+    # This is not necessary and, moreover, slow
+
     ((only)) && exit 0
 fi
 
