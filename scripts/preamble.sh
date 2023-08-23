@@ -13,7 +13,7 @@ usage () {
         "[-$PCA_FLG $(print_arg_choices "${!PCAS[@]}")]"\
         "[-$MDL_FLG $(print_arg_choices "${!MDLS[@]}")]"\
         "[-$TSK_FLG $(print_arg_choices "${!STASK2DARG[@]}")]"\
-        "[-$ORD_FLG NN] [-$VCB_FLG N] [-$WID_FLG NN] [-$BET_FLG 0-1]"\
+        "[-$ORD_FLG NN] [-$VCB_FLG N] [-$WID_FLG NN] [-$BET_FLG 0-1]"
     if ((ret == 0)); then
         cat << EOF 1>&2
 
