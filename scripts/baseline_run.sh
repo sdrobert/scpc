@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+set -eo pipefail
 
 if [ ! -d "prep" ]; then
     echo "'prep' is not a directory. Did you call
@@ -41,7 +41,6 @@ source scripts/preamble.sh
 
 dl="$data/librispeech"
 em="$exp/$model/version_$ver"
-bl="$em/baseline"
 
 if [ -z "$pca" ]; then
   bl="$em/baseline/full_v${vocab_size}"
@@ -50,36 +49,26 @@ else
   bl="$em/baseline/pca${pca}_v${vocab_size}"
   dlf="$em/reps/pca${pca}_v${vocab_size}"
 fi
-
-blt="$bl/tuning"
 bld="$bl/decoding"
+
 ckpt_2kshort="$bl/2kshort.pt"
 ckpt_final="$bl/final.pt"
 local_sw="$dl/local/sw${vocab_size}"
 lm_train_gz="${local_sw}/librispeech-lm-norm-subword.txt.gz"
-lm_gz="${local_sw}/lm.$lm_ord.arpa.gz"
-lm_pt="${local_sw}/lm.$lm_ord.pt"
-conds=( nolm )
-if ((lm_ord > 0)); then
-    conds+=( lm.$lm_ord )
+if [ "$lm_ord" = 0 ]; then
+    dname="nolm"
+    lm_gz=
+    lm_pt=
+else
+    lm_gz="${local_sw}/lm.$lm_ord.arpa.gz"
+    lm_pt="${local_sw}/lm.$lm_ord.pt"
+    dname="lm_ord${lm_ord}_binv${binv}"
 fi
-
-# if [ ! -z "${NOLM:+xxx}" ]; then
-#     echo "Skipping lm condition"
-#     with_lm=false
-# elif which lmplz 2> /dev/null; then
-#     echo "kenlm found. Will add 'lm' condition"
-#     CONDS+=( lm )
-#     with_lm=true
-# else
-#     echo "Cannot find kenlm and env var NOLM was not set. Continuing the"
-#     echo "recipe without the LM will require you to modify the"
-#     echo "recipe/artifacts later. If you're okay with this, define the NOLM"
-#     echo "environment variable and try calling this script again. If you "
-#     echo "already finished the part of the script which compiles with kenlm, "
-#     echo 
-#     exit 1
-# fi
+if [ "$width" = 0 ]; then
+    dname="${dname}_greedy"
+else
+    dname="${dname}_width${width}"
+fi
 
 ckpt_pre="$em/best.ckpt"
 if [ ! -f "$ckpt_pre" ]; then
@@ -185,11 +174,11 @@ fi
 for x in dev_clean train_clean_100 dev_other test_clean test_other; do
   pdir="$dlf/$x"
   if [ ! -f "$pdir/.a2r_complete" ]; then
+    rm -rf "$tmp" "$pdir/feat"
     tmp="$em/tmp/$x"
-    echo "Linking wav files into $tmp"
-    rm -rf "$tmp"
+    echo "Splitting wav.scp into $tmp"
     mkdir -p "$tmp" "$pdir/feat"
-    wav_num="$(cat "${local_sw}/$x.wav.scp"| wc -l)"
+    wav_num="$(wc -l "${local_sw}/$x.wav.scp"| cut -d ' ' -f 1)"
     lines_per_proc="$(( (wav_num + nproc - 1) / nproc ))"
 
     split -dl "$lines_per_proc" "${local_sw}/$x.wav.scp" "$tmp/wav.scp"
@@ -199,29 +188,16 @@ for x in dev_clean train_clean_100 dev_other test_clean test_other; do
         exit 1
     fi
 
-    for f in "$tmp/wav.scp"*; do
-        stmp="$tmp/${f##*scp}"
-        mkdir -p "$stmp"
-        $cmd_p awk -v tmp="$stmp" '{print $2,tmp"/"$1".flac"}' "$f" |
-            xargs -P $nwork -I % bash -c 'ln -sf $1' -- %
-    done
-    tmp_num="$(find "$tmp" -name '*.flac' | wc -l)"
-    if [ "$wav_num" != "$tmp_num" ]; then
-        echo "Expected $wav_num utts in $tmp; got $tmp_num"
-        exit 1
-    fi
-
     echo "Computing representations in $pdir"
     for f in "$tmp/wav.scp"*; do
-        stmp="$tmp/${f##*scp}"
-        $cmd_p scpc-a2r $expert_args --audio-suffix .flac \
-            "$stmp" "$ckpt_pre" "$pdir/feat" && touch "$stmp/.complete" &
+        $cmd_p scpc-a2r $expert_args \
+            --in-map "$f" "$ckpt_pre" "$pdir/feat" && \
+            touch "$tmp/.complete.$(basename "$f")" &
     done
     
     wait
     for f in "$tmp/wav.scp"*; do
-        stmp="$tmp/${f##*scp}"
-        if [ ! -f "$stmp/.complete" ]; then
+        if [ ! -f "$tmp/.complete.$(basename "$f")" ]; then
             echo "${f##*scp} failed!"
             exit 1
         fi
@@ -269,7 +245,7 @@ if [ ! -f "$ckpt_2kshort" ]; then
     echo "Training baseline for $model with 2k shortest utterances"
     if [ $nproc -gt 1 ]; then
         train_script="torchrun --standalone --nproc_per_node=$nproc"
-        xtra_args="--distributed-backend nccl $x"
+        xtra_args_="--distributed-backend nccl $xtra_args"
     else
         train_script=""
     fi
@@ -284,7 +260,7 @@ if [ ! -f "$ckpt_2kshort" ]; then
             --read-training-yaml "$bl/2kshort-training.yaml" \
             --state-dir "$state_dir" \
             --state-csv "$bl/2kshort-training.csv" \
-            $xtra_args "$dlf/"{train_2kshort,dev_clean} "$ckpt_2kshort"
+            ${xtra_args_} "$dlf/"{train_2kshort,dev_clean} "$ckpt_2kshort"
     $clean && rm -rf "$state_dir"
     ((only)) && exit 0
 fi
@@ -293,7 +269,7 @@ if [ ! -f "$ckpt_final" ]; then
     echo "Training baseline for $model"
     if [ $nproc -gt 1 ]; then
         train_script="torchrun --standalone --nproc_per_node=$nproc"
-        xtra_args="--distributed-backend nccl $x"
+        xtra_args_="--distributed-backend nccl $xtra_args"
     else
         train_script=""
     fi
@@ -309,7 +285,7 @@ if [ ! -f "$ckpt_final" ]; then
             --read-training-yaml "$bl/training.yaml" \
             --state-dir "$state_dir" \
             --state-csv "$bl/training.csv" \
-            $xtra_args "$dlf/"{train_clean_100,dev_clean} "$ckpt_final"
+            ${xtra_args_} "$dlf/"{train_clean_100,dev_clean} "$ckpt_final"
     if $clean; then
         rm -rf "$state_dir"
         for x in "$dlf/train_"*; do
@@ -355,73 +331,40 @@ EOF
     done
 done
 
-for width in "${WIDTHS[@]}"; do
-    for cond in "${conds[@]}"; do
-        Tdir="$blt/${cond}_b${width}"
-        if [ ! -f "$Tdir/score.txt" ]; then
-            $cmd_p compute-torch-token-data-dir-error-rates \
-                --quiet \
-                "$dlf/dev_clean/ref" "$Tdir"  > "$Tdir/score.txt" \
-                || (rm -f "$Tdir/score.txt" && exit 1)
-            $clean && find "$Tdir/" -name 'lbi-*.pt' -delete
-            ((only)) && exit 0
-        fi
-    done
-done
-
-for cond in "${conds[@]}"; do
-    if [ ! -f "$bl/$cond-tuned.decode.args.txt" ]; then
-        best_er=1000
-        best_args=DEADBEEF
-        for width in "${WIDTHS[@]}"; do
-            Tdir="$blt/${cond}_b${width}"
-            er=$(cat "$Tdir/score.txt")
-            if (( $(echo "$er < $best_er" | bc -l) )); then
-                best_er=$er
-                best_args="$Tdir/decode.args.txt"
-            fi
-        done
-        cp "$best_args" "$bl/$cond-tuned.decode.args.txt"
+for x in dev_clean dev_other test_clean test_other; do
+    src="$dlf/$x"
+    hyps="$bld/$x/$dname"
+    if [ ! -f "$hyps/.complete" ]; then
+        mkdir -p "$hyps"
+        echo "Decoding $x"
+        $cmd_p prep/asr_baseline.py \
+            --read-model-yaml "$bl/model.yaml" \
+            --mvn-path "$dlf/ext/mvn.pt" \
+            decode ${lm_pt:+--lookup-lm-state-dict "$lm_pt"} \
+                --beam-width "$width" \
+                --inverse-beta "$binv" \
+                --read-data-yaml "$bl/data.yaml" \
+                --max-hyp-len 500 \
+                "$ckpt_final" "$src" "$hyps"
+        touch "$hyps/.complete"
         ((only)) && exit 0
     fi
 done
 
-rem=$nproc
 for x in dev_clean dev_other test_clean test_other; do
-    src="$dlf/$x"
-    for y in "${conds[@]}"; do
-        dst="$bld/$x/$y"
-        if [ ! -f "$dst/.complete" ]; then
-            mkdir -p "$dst"
-            echo "Decoding $x with $y"
-            $cmd_p prep/asr_baseline.py \
-                --read-model-yaml "$bl/model.yaml" \
-                --mvn-path "$dlf/ext/mvn.pt" \
-                decode \
-                    "@$bl/$y-tuned.decode.args.txt" \
-                    --read-data-yaml "$bl/data.yaml" \
-                    --max-hyp-len 500 \
-                    "$ckpt_final" "$src" "$dst"
-            touch "$dst/.complete"
-            ((only)) && exit 0
-        fi
-    done
-done
-
-for x in dev_clean dev_other test_clean test_other; do
-    for y in "${conds[@]}"; do
-        if [ ! -f "$bld/$x.hyp.wrd.$y.trn" ]; then
-            echo "Creating transcriptions of $x with $y"
-            $cmd_p torch-token-data-dir-to-trn \
-                --num-workers $nwork \
-                "$bld/$x/$y" "$dlf/ext/id2token.txt" \
-                "$bld/$x.hyp.sw${vocab_size}.$y.trn"
-            $cmd_p prep/subword2word.py \
-                "$bld/$x.hyp."{sw${vocab_size},wrd}".$y.trn"
-            $clean && find "$bld/$x/$y" -name 'lbi-*.pt' -delete
-            ((only)) && exit 1
-        fi
-    done
+    hyps="$bld/$x/$dname"
+    sw_trn="$bld/$x.hyp.sw${vocab_size}.$dname.trn"
+    wrd_trn="$bld/$x.hyp.word.$dname.trn"
+    if [ ! -f "$sw_trn" ] || [ ! -f "$wrd_trn" ]; then
+        echo "Creating transcriptions for $x"
+        $cmd_p torch-token-data-dir-to-trn \
+            --num-workers $nwork \
+            "$dname" "$dlf/ext/id2token.txt" \
+            "$sw_trn"
+        $cmd_p prep/subword2word.py "$sw_trn" "$wrd_trn"
+        $clean && find "$hyps/" -name 'lbi-*.pt' -delete
+        ((only)) && exit 1
+    fi
 done
 
 if $clean; then

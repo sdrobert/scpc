@@ -22,5 +22,6 @@
   "python.analysis.extraPaths": [
     "./prep"
   ],
-  "notebook.output.textLineLimit": 50
+  "notebook.output.textLineLimit": 50,
+  "python.analysis.typeCheckingMode": "off"
 }

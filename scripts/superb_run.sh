@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+set -eo pipefail
 
 if [ ! -d "s3prl" ]; then
     echo "'s3prl' is not a directory. Did you call

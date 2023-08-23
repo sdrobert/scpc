@@ -13,8 +13,7 @@ usage () {
         "[-$PCA_FLG $(print_arg_choices "${!PCAS[@]}")]"\
         "[-$MDL_FLG $(print_arg_choices "${!MDLS[@]}")]"\
         "[-$TSK_FLG $(print_arg_choices "${!STASK2DARG[@]}")]"\
-        "[-$ORD_FLG NN]"\
-        "[-$VCB_FLG N]"
+        "[-$ORD_FLG NN] [-$VCB_FLG N] [-$WID_FLG NN] [-$BET_FLG 0-1]"\
     if ((ret == 0)); then
         cat << EOF 1>&2
 
@@ -45,6 +44,10 @@ Options
          max order (default: $lm_ord; ./scripts/baseline_run.sh only)
  -$VCB_FLG      The subword vocabulary size (default: $vocab_size;
          ./scripts/baseline_run.sh only)
+ -$WID_FLG      Beam width for decoding. 0 is greedy (default: $width;
+         ./scripts/baseline_run.sh only)
+ -$BET_FLG      Inverse beta (mixing coefficient) for decoding (default: $binv;
+         ./scripts/baseline_run.sh only)
 
 *-$MDL_FLG accepts models not in the list (i.e. not in conf/model.*.yaml or
 not valid) if the model/version pair already exists in the experiment directory
@@ -70,6 +73,8 @@ VCB_FLG=i
 VER_FLG=v
 WRK_FLG=w
 XTR_FLG=x
+WID_FLG=q
+BNV_FLG=b
 
 DEFT_FT=raw
 declare -A FTS=( [raw]=x [fbank]=x [fbank-80]=x [superb.fbank]=x )
@@ -157,8 +162,10 @@ stask=pr
 clean=false
 lm_ord=0
 vocab_size=2000
+width=8
+binv=2
 
-while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:${ORD_FLG}:${VCB_FLG}:" opt; do
+while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:${ORD_FLG}:${VCB_FLG}:${WID_FLG}:${BNV_FLG}:" opt; do
     case $opt in
         ${HLP_FLG})
             usage 0
@@ -219,6 +226,14 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${M
         ${VCB_FLG})
             argcheck_is_nat $opt "$OPTARG"
             vocab_size="$OPTARG"
+            ;;
+        ${WID_FLG})
+            argcheck_is_nnint $opt "$OPTARG"
+            width="$OPTARG"
+            ;;
+        ${BNV_FLG})
+            argcheck_is_nat $opt "$OPTARG"
+            binv="$OPTARG"
             ;;
         ?)
             echo "-$OPTARG is not an option"

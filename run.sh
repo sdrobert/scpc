@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+set -eo pipefail
 
 if [ ! -d "prep" ]; then
     echo "'prep' is not a directory. Did you call

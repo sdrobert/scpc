@@ -24,11 +24,7 @@ import numpy as np
 
 from .expert import get_feature_extractor_parser, UpstreamExpert
 
-try:
-    import pydrobert.speech.util as sutil
-    import pydrobert.speech.config as sconfig
-except ImportError:
-    sutil = sconfig = None
+import pydrobert.speech.util as sutil
 
 
 def _is_dir(val: str) -> str:
@@ -43,7 +39,21 @@ def main(args: Optional[Sequence[str]] = None):
         description="Convert audio files to representation files",
         parents=[get_feature_extractor_parser()],
     )
-    parser.add_argument("in_dir", type=_is_dir, help="Path containing wav files")
+    in_grp = parser.add_mutually_exclusive_group(required=True)
+    in_grp.add_argument(
+        "--in-dir",
+        type=_is_dir,
+        default=None,
+        help="Path storing input audio files. Utt id is basename minus "
+        "--audio-suffix. Output directory layout reproduces that of input",
+    )
+    in_grp.add_argument(
+        "--in-map",
+        type=argparse.FileType("r"),
+        default=None,
+        help="File containing <utt-id> <audio-file> pairs. Utterances stored flat "
+        "in out_dir",
+    )
     parser.add_argument(
         "ckpt", type=argparse.FileType("rb"), help="Path to pre-trained model"
     )
@@ -54,7 +64,9 @@ def main(args: Optional[Sequence[str]] = None):
         default=False,
         help="Whether to store as .npy files",
     )
-    parser.add_argument("--audio-suffix", default=".wav", help="Suffix of audio files")
+    parser.add_argument(
+        "--audio-suffix", default=".wav", help="Suffix of audio files (--in-dir only)"
+    )
     parser.add_argument(
         "--device",
         default=None,
@@ -75,14 +87,12 @@ def main(args: Optional[Sequence[str]] = None):
             "kaldi",
             "file",
             "soundfile",
-        }
-        | sconfig.SOUNDFILE_SUPPORTED_FILE_TYPES,
-        help="Force the paths in 'map' to be interpreted as a specific type "
-        "of data. table: kaldi table (key is utterance id); wav: wave file; "
-        "hdf5: HDF5 archive (key is utterance id); npy: Numpy binary; npz: "
-        "numpy archive (key is utterance id); pt: PyTorch binary; sph: NIST "
-        "SPHERE file; kaldi: kaldi object; file: numpy.fromfile binary. soundfile: "
-        "force soundfile processing.",
+        },
+        help="Force audio files to be read as a specific type. table: kaldi table (key "
+        "is utterance id); wav: wave file; hdf5: HDF5 archive (key is utterance id); "
+        "npy: Numpy binary; npz: numpy archive (key is utterance id); pt: PyTorch "
+        "binary; sph: NIST SPHERE file; kaldi: kaldi object; file: numpy.fromfile "
+        "binary. soundfile: force soundfile processing.",
     )
     parser.add_argument(
         "--channel",
@@ -101,12 +111,29 @@ def main(args: Optional[Sequence[str]] = None):
 
     expert = UpstreamExpert(options.ckpt, options=options).to(options.device)
 
-    in_dir = glob.escape(options.in_dir)
-    for inf in chain(
-        glob.iglob(f"{in_dir}/**/*{options.audio_suffix}"),
-        glob.iglob(f"{in_dir}/*{options.audio_suffix}"),
-    ):
-        utt_id = os.path.basename(inf).rsplit(options.audio_suffix, 1)[0]
+    if options.in_dir is not None:
+        in_dir = glob.escape(options.in_dir)
+        it = chain(
+            glob.iglob(f"{in_dir}/**/*{options.audio_suffix}"),
+            glob.iglob(f"{in_dir}/*{options.audio_suffix}"),
+        )
+        it = (
+            (
+                os.path.basename(inf).rsplit(options.audio_suffix, 1)[0],
+                inf,
+                os.path.join(
+                    options.out_dir,
+                    os.path.relpath(os.path.dirname(inf), options.in_dir),
+                ),
+            )
+            for inf in it
+        )
+    else:
+        assert options.in_map is not None
+        it = (
+            str(x).strip().split(maxsplit=1) + [options.out_dir] for x in options.in_map
+        )
+    for utt_id, inf, odir in it:
         signal = sutil.read_signal(inf, dtype=np.float32, force_as=options.force_as)
         if options.channel == -1 and signal.ndim > 1 and signal.shape[0] > 1:
             raise ValueError(
@@ -126,10 +153,6 @@ def main(args: Optional[Sequence[str]] = None):
         if signal.isnan().any():
             raise ValueError(f"'{inf}' contains NaN values!")
         assert not signal.isnan().any()
-        odir = os.path.join(
-            options.out_dir,
-            os.path.relpath(os.path.dirname(inf), options.in_dir),
-        )
         reps = expert([signal])["hidden_states"][0].cpu()
         if reps.isnan().any():
             raise ValueError(f"representation of '{inf}' contains NaN values!")

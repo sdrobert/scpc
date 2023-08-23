@@ -48,7 +48,7 @@ fi
 export APP_DIR="$dz/local/data"
 export TEMP_DIR="$TMPDIR"
 
-set -e
+set -eo pipefail
 
 if [ ! -f "$dz/.complete" ]; then
     echo "Downloading zerospeech abxLS"
@@ -77,7 +77,7 @@ fi
 if [ ! -f "$zs/.a2r_complete" ]; then
     echo "Computing abxLS speech representations using $model model"
     $cmd_p scpc-a2r $expert_args \
-        "$APP_DIR/datasets/abxLS-dataset" "$ckpt" "$zs" --numpy
+        --in-dir "$APP_DIR/datasets/abxLS-dataset" "$ckpt" "$zs" --numpy
     touch "$zs/.a2r_complete"
     ((only)) && exit 0
 fi
