@@ -13,4 +13,4 @@ source scripts/vector_env.sh
 P="${SLURM_TASKS_PER_NODE:-1}"
 W="${SLURM_CPUS_PER_TASK:-4}"
 
-./run.sh -s -p "$P" -w "$W" -x "--quiet" "$@"
+./run.sh -zs -p "$P" -w "$W" -x "--quiet" "$@"
