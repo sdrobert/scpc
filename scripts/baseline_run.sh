@@ -95,7 +95,7 @@ if [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
     $cmd_p python prep/librispeech.py "$dl" init_subword "$libri" \
         --vocab-size ${vocab_size} --config-subdir "sw${vocab_size}"
     for x in dev_clean train_clean_100 dev_other test_clean test_other; do
-        ln -sf "${local_sw}/$x.ref"{,.sw${vocab_size}}".trn"
+        ln -sf "$x.ref.trn" "${local_sw}/$x.ref.sw${vocab_size}.trn"
         $cmd_p prep/subword2word.py "${local_sw}/$x.ref"{,.wrd}".trn"
     done
     touch "$dl/.sw${vocab_size}_complete"
@@ -212,9 +212,10 @@ done
 if [ ! -f "$dlf/.complete" ]; then
     echo "Converting into SpectDataSet"
     ln -sf "$(cd "$dl/local"; pwd -P)" "$dlf/../local"
-    $cmd_p python prep/librispeech.py \
-        "$dlf/.." torch_dir sw${vocab_size} $(basename "$dlf") \
-            --feats-from $(basename "$dlf") ${TR2TD_ARGS[100]}
+    # $cmd_p python prep/librispeech.py \
+    #     "$dlf/.." torch_dir sw${vocab_size} $(basename "$dlf") \
+    #         --skip-verify \
+    #         --feats-from $(basename "$dlf") ${TR2TD_ARGS[100]}
     $cmd_p compute-mvn-stats-for-torch-feat-data-dir \
         --num-workers $nwork \
         "$dlf/train_clean_100/feat" "$dlf/ext/mvn.pt"
@@ -295,42 +296,6 @@ if [ ! -f "$ckpt_final" ]; then
     ((only)) && exit 0
 fi
 
-rem=$nproc
-for width in "${WIDTHS[@]}"; do
-    for cond in "${conds[@]}"; do
-        Tdir="$blt/${cond}_b${width}"
-        if [ ! -f "$Tdir/.complete" ]; then
-            mkdir -p "$Tdir"
-            echo "Checking $cond with beam width $width"
-            if [ "$cond" = nolm ]; then
-                cat << EOF > "$Tdir/decode.args.txt"
---beam-width
-$width
-EOF
-            else
-                cat << EOF > "$Tdir/decode.args.txt"
---beam-width
-$width
---lookup-lm-state-dict
-$lm_pt
---beta
-0.5
-EOF
-            fi
-            $cmd_p prep/asr_baseline.py \
-                --read-model-yaml "$bl/model.yaml" \
-                --mvn-path "$dlf/ext/mvn.pt" \
-                decode \
-                    "@$Tdir/decode.args.txt" \
-                    --read-data-yaml "$bl/data.yaml" \
-                    --max-hyp-len 500 \
-                    "$ckpt_final" "$dlf/dev_clean" $Tdir
-            touch "$Tdir/.complete"
-            ((only)) && exit 0
-        fi
-    done
-done
-
 for x in dev_clean dev_other test_clean test_other; do
     src="$dlf/$x"
     hyps="$bld/$x/$dname"
@@ -354,12 +319,12 @@ done
 for x in dev_clean dev_other test_clean test_other; do
     hyps="$bld/$x/$dname"
     sw_trn="$bld/$x.hyp.sw${vocab_size}.$dname.trn"
-    wrd_trn="$bld/$x.hyp.word.$dname.trn"
+    wrd_trn="$bld/$x.hyp.wrd.$dname.trn"
     if [ ! -f "$sw_trn" ] || [ ! -f "$wrd_trn" ]; then
         echo "Creating transcriptions for $x"
         $cmd_p torch-token-data-dir-to-trn \
             --num-workers $nwork \
-            "$dname" "$dlf/ext/id2token.txt" \
+            "$hyps" "$dlf/ext/id2token.txt" \
             "$sw_trn"
         $cmd_p prep/subword2word.py "$sw_trn" "$wrd_trn"
         $clean && find "$hyps/" -name 'lbi-*.pt' -delete
@@ -367,18 +332,18 @@ for x in dev_clean dev_other test_clean test_other; do
     fi
 done
 
-if $clean; then
-    rm -rf "$bl/states_"*
-    for x in "$dlf" "$blt" "$bld"; do
-        find "$x/" -name 'lbi-*.pt' -delete
-    done
-fi
+# if $clean; then
+#     rm -rf "$bl/states_"*
+#     for x in "$dlf" "$blt" "$bld"; do
+#         find "$x/" -name 'lbi-*.pt' -delete
+#     done
+# fi
 
 echo "-----------------------------------------------"
 echo "Subword error rates with vocab size $vocab_size"
 for x in dev_clean dev_other test_clean test_other; do
     prep/error-rates-from-trn.py --suppress-warning \
-        "${sw_local}/$x.ref.sw${vocab_size}.trn" \
+        "${local_sw}/$x.ref.sw${vocab_size}.trn" \
         "$bld/$x.hyp.sw${vocab_size}."*.trn
 done
 
@@ -386,6 +351,6 @@ echo ""
 echo "Word error rates"
 for x in dev_clean dev_other test_clean test_other; do
     prep/error-rates-from-trn.py --suppress-warning \
-        "${sw_local}/$x.ref.wrd.trn" \
+        "${local_sw}/$x.ref.wrd.trn" \
         "$bld/$x.hyp.wrd."*.trn
 done

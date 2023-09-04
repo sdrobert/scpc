@@ -6,7 +6,6 @@
 #SBATCH --mem-per-cpu=1G
 #SBATCH --array=1-100%1
 #SBATCH --output=exp/slurm_logs/slurm-%A.out
-#SBATCH --open-mode=append
 
 # we don't rely on pytorch-lightning to requeue b/c CC doesn't allow requeuing
 # via scontrol. Following https://docs.alliancecan.ca/wiki/Running_jobs, we
@@ -17,7 +16,7 @@ export NCCL_DEBUG=INFO
 
 source scripts/cc_env.sh
 
-P="${SLURM_TASKS_PER_NODE:-1}"
+P="${SLURM_NTASKS:-1}"
 W="${SLURM_CPUS_PER_TASK:-4}"
 
 script="./run.sh"

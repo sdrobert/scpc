@@ -175,7 +175,7 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${M
             ;;
         ${SRN_FLG})
             cmd="srun -- "
-            cmd_p="srun --ntasks=1 -- "
+            cmd_p="srun --ntasks=1 --nodes=1 -- "
             ;;
         ${CLN_FLG})
             clean=true
