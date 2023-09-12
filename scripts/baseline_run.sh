@@ -332,12 +332,12 @@ for x in dev_clean dev_other test_clean test_other; do
     fi
 done
 
-# if $clean; then
-#     rm -rf "$bl/states_"*
-#     for x in "$dlf" "$blt" "$bld"; do
-#         find "$x/" -name 'lbi-*.pt' -delete
-#     done
-# fi
+if $clean; then
+    rm -rf "$bl/states_"*
+    for x in "$dlf" "$bld"; do
+        find "$x/" -name 'lbi-*.pt' -delete
+    done
+fi
 
 echo "-----------------------------------------------"
 echo "Subword error rates with vocab size $vocab_size"
