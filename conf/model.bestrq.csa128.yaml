@@ -1,5 +1,5 @@
-name: bestrq.csa64
-system_description: "BEST-RQ with a 64-frame causal transformer layer"
+name: bestrq.csa128
+system_description: "BEST-RQ with a 128-frame causal transformer layer"
 feat_type: fbank-80
 input_size: 80
 latent_type: ff
@@ -8,7 +8,7 @@ ff:
   output_size: 256
 csa:
   dim_feedforward: 1024
-  max_width: 64
+  max_width: 128
 training:
   num_devices:
   accumulate_grad_batches: 3

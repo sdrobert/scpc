@@ -4,6 +4,8 @@
 
 source scripts/utils.sh
 
+set -eo pipefail
+
 usage () {
     local ret="${1:-1}"
     echo -e "Usage: $0 [-${HLP_FLG}] [-${OLY_FLG}] [-${SRN_FLG}]" \

@@ -13,4 +13,5 @@ source scripts/vector_env.sh
 P="${SLURM_TASKS_PER_NODE:-1}"
 W="${SLURM_CPUS_PER_TASK:-4}"
 
+export PYTORCH_CUDA_ALLOC_CONF='max_split_size_mb:512'
 ./run.sh -zs -p "$P" -w "$W" -x "--quiet" "$@"
