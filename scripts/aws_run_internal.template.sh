@@ -183,9 +183,8 @@ echo "Activating and updating python environment"
 source activate pytorch
 if [ ! -f .install_complete ]; then
     $DO_TENSORBOARD && conda install tensorboard
-    conda install -c coml "virtual-dataset=1.0.0" "zerospeech-benchmarks=0.9.1" "zerospeech-libriabx2=0.9.7" "zerospeech-tde=2.0.2"
     conda install -c sdrobert pydrobert-kaldi pydrobert-param
-    pip install "git+https://github.com/sdrobert/pydrobert-pytorch.git@scpc" "git+https://github.com/sdrobert/pydrobert-speech"
+    pip install "git+https://github.com/sdrobert/pydrobert-pytorch.git" "git+https://github.com/sdrobert/pydrobert-speech"
     pip install '.[all]'
     touch .install_complete
 fi

@@ -52,6 +52,12 @@ for flag in "${!flag2vals[@]}"; do
   a=( "${b[@]}" )
 done
 
+echo "The grid (starts in 10 secs):"
+for cmd in "${a[@]}"; do
+  echo "$cmd"
+done
+sleep 10
+
 for cmd in "${a[@]}"; do
   $cmd || exit 1
 done
