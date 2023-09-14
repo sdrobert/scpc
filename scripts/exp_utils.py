@@ -58,7 +58,7 @@ def collate_data(
 
     model_data, res_data = [], []
     exp_dir: Path = Path(exp_dir)
-    for id, pth in enumerate(exp_dir.glob("*/*/model.yaml")):
+    for id, pth in enumerate(exp_dir.glob("*/version_????/model.yaml")):
         model, version = pth.parts[-3:-1]
         if model in model_blacklist:
             continue
@@ -150,6 +150,10 @@ def collate_data(
             regex=f"^training\\.{loss_type.replace('-', '_')}_loss"
         ).columns
         df.loc[loss_ne_idx, loss_cols] = pd.NA
+    
+    # fill max_chunks with zeros whenever the chunking policy is none
+    no_chunking_idx = df["training.chunking.policy"] == "none"
+    df.loc[no_chunking_idx, "training.chunking.max_chunks"] = 0
 
     if collapse_distributed:
         # make turn task-level sizes into global sizes by multiplying by num_devices and
