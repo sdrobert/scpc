@@ -127,7 +127,7 @@ In general, recipes spawn two directories of note. `data/` contains the
 relevant audio files, features, transcriptions, _etc._ while `exp/` contains
 models, scores, _etc._. The structure of `exp/` after training is as follows:
 
-```
+```text
 exp/
   <model-name>/
     version_<version-no>/
@@ -170,6 +170,5 @@ folder](s3prl/s3prl/upstream/scpc).
 repository borrows from in [modules.py](src/scpc/modules.py), is MIT-licensed.
 See [LICENSE_cpc_audio](LICENSE_cpc_audio).
 
-
-[^1]: Unless the chunking policy specified by the configuration is one of 
+[^1]: Unless the chunking policy specified by the configuration is one of
       `'ali'` or `'ref'`.
