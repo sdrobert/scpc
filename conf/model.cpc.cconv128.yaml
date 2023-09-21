@@ -1,11 +1,11 @@
-name: cpc.cconv32
-system_description: "CPC-small but with conv context and 32-frame window"
+name: cpc.cconv128
+system_description: "CPC-small but with conv context and 128-frame window"
 context_type: cconv
 conv:
   output_size: 256
 cconv:
-  output_size: 128
-  kernel_size: 32
+  output_size: 32
+  kernel_size: 128
 training:
   num_devices:
   accumulate_grad_batches: 3

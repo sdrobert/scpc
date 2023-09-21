@@ -8,14 +8,12 @@ cconv:
   kernel_size: 4
 training:
   num_devices:
+  accumulate_grad_batches: 3
+  max_epochs: 200
   data:
     common:
-      batch_size: 12
-      drop_last: true
+      batch_size: 4
   cpc_loss:
     prediction_type: csa
-    offset: 3
-    prediction_steps: 6
-    gutted_steps: 5
   chunking:
-    max_chunks: 64
+    policy: none
