@@ -52,13 +52,14 @@ def collate_data(
     exp_dir: str = "../exp",
     model_blacklist: Sequence[str] = MODEL_BLACKLIST,
     collapse_distributed: bool = True,
+    model_yaml_glob: str = "*/version_????/model.yaml",
 ):
     """Combine experiment parameters and results"""
     yaml = YAML(typ="safe", pure=True)
 
     model_data, res_data = [], []
     exp_dir: Path = Path(exp_dir)
-    for id, pth in enumerate(exp_dir.glob("*/version_????/model.yaml")):
+    for id, pth in enumerate(exp_dir.glob(model_yaml_glob)):
         model, version = pth.parts[-3:-1]
         if model in model_blacklist:
             continue
