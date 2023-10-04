@@ -56,19 +56,13 @@ ckpt_final="$bl/final.pt"
 local_sw="$dl/local/sw${vocab_size}"
 lm_train_gz="${local_sw}/librispeech-lm-norm-subword.txt.gz"
 if [ "$lm_ord" = 0 ]; then
-    dname="nolm"
+    dname="nolm_width${width}"
     lm_gz=
-    lm_pt=
 else
+    dname="lm_ord${lm_ord}_width${width}"
     lm_gz="${local_sw}/lm.$lm_ord.arpa.gz"
-    lm_pt="${local_sw}/lm.$lm_ord.pt"
-    dname="lm_ord${lm_ord}_binv${binv}"
 fi
-if [ "$width" = 0 ]; then
-    dname="${dname}_greedy"
-else
-    dname="${dname}_width${width}"
-fi
+blt="$bld/tuning/$dname"
 
 ckpt_pre="$em/best.ckpt"
 if [ ! -f "$ckpt_pre" ]; then
@@ -76,12 +70,12 @@ if [ ! -f "$ckpt_pre" ]; then
     exit 1
 fi
 
-if [ -z "$libri" ] && [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
+if [ -z "$libri" ]; then
     libri="$dl/local/data"
-    if [ ! -f "$libri/.bl_complete" ]; then
+    if [ ! -f "$libri/.bl_complete" ] && [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
         echo "Downloading librispeech"
         $cmd_p python prep/librispeech.py "$dl" download ${TR2DL_ARGS[100]}
-        $with_lm && $cmd_p python prep/librispeech.py "$dl" download \
+        [ "$lm_ord" = 0 ] || $cmd_p python prep/librispeech.py "$dl" download \
                 --files librispeech-lm-norm.txt.gz
         touch "$libri/.bl_complete"
         ((only)) && exit 0
@@ -98,36 +92,37 @@ if [ ! -f "$dl/.sw${vocab_size}_complete" ]; then
         ln -sf "$x.ref.trn" "${local_sw}/$x.ref.sw${vocab_size}.trn"
         $cmd_p prep/subword2word.py "${local_sw}/$x.ref"{,.wrd}".trn"
     done
+    cp -f "$(find "$libri" -name 'librispeech-vocab.txt')" "${local_sw}/"
     touch "$dl/.sw${vocab_size}_complete"
     ((only)) && exit 0
 fi
 
-if ((lm_ord > 0)) && [ ! -f "$lm_train_gz" ]; then
-    echo "Constructing subword LM training file"
-    [ -z "$libri" ] && libri="$dl/local/data"
-    tdata="$(find "$libri" -name "librispeech-lm-norm.txt" | head -n 1)"
-    if [ -z "$tdata" ]; then
-        tdata="$(find "$libri" -name "librispeech-lm-norm.txt.gz" | head -n 1)"
-        if [ -z "$tdata" ]; then
-            echo "Could not find librispeech-lm-norm.txt[.gz] in '$libri'"
-            exit 1
-        fi
-        tdata_cmd=( gunzip -c "$tdata" )
-    else
-        tdata_cmd=( cat "$tdata" )
-    fi
-    $cmd_p "${tdata_cmd[@]}" |
-        prep/word2subword.py -s "${local_sw}/spm.model" --both-raw |
-        gzip -c > "${lm_train_gz}_"
-    gzip -t "${lm_train_gz}_" || (rm -f "${lm_train_gz}_" && exit 1)
-    mv "${lm_train_gz}"{_,}
-    ((only)) && exit 0
-fi
+# if ((lm_ord > 0)) && [ ! -f "$lm_train_gz" ]; then
+#     echo "Constructing subword LM training file"
+#     [ -z "$libri" ] && libri="$dl/local/data"
+#     tdata="$(find "$libri" -name "librispeech-lm-norm.txt" | head -n 1)"
+#     if [ -z "$tdata" ]; then
+#         tdata="$(find "$libri" -name "librispeech-lm-norm.txt.gz" | head -n 1)"
+#         if [ -z "$tdata" ]; then
+#             echo "Could not find librispeech-lm-norm.txt[.gz] in '$libri'"
+#             exit 1
+#         fi
+#         tdata_cmd=( gunzip -c "$tdata" )
+#     else
+#         tdata_cmd=( cat "$tdata" )
+#     fi
+#     $cmd_p "${tdata_cmd[@]}" |
+#         prep/word2subword.py -s "${local_sw}/spm.model" --both-raw |
+#         gzip -c > "${lm_train_gz}_"
+#     gzip -t "${lm_train_gz}_" || (rm -f "${lm_train_gz}_" && exit 1)
+#     mv "${lm_train_gz}"{_,}
+#     ((only)) && exit 0
+# fi
 
 if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
-    echo "Building $lm_ord-gram subword-level language model"
+    echo "Building $lm_ord-gram word-level language model"
     [ -z "$libri" ] && libri="$dl/local/data"
-    if which lmplz 2> /dev/null; then
+    if which lmplz 2>&1 > /dev/null; then
         echo "found kenlm (lmplz). Using it to build lm"
         lm_cmd="lmplz -S 8G --discount_fallback 0.5 1.0 1.5 --prune"
     else
@@ -139,7 +134,15 @@ if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
     else
         prunes="0 1"
     fi
-    $cmd_p $lm_cmd $prunes -o $lm_ord < "$lm_train_gz" |
+    tdata="$(find "$libri" -name "librispeech-lm-norm.txt" | head -n 1)"
+    if [ -z "$tdata" ]; then
+        tdata="$(find "$libri" -name "librispeech-lm-norm.txt.gz" | head -n 1)"
+        if [ -z "$tdata" ]; then
+            echo "Could not find librispeech-lm-norm.txt[.gz] in '$libri'"
+            exit 1
+        fi
+    fi
+    $cmd_p $lm_cmd $prunes -o $lm_ord < "$tdata" |
         gzip -c > "${lm_gz}_" 
     if [ $(gunzip -c "${lm_gz}_" 2> /dev/null | head -n 1 | wc -l) != 1 ]; then
         echo "n-gram lm creation failed!"
@@ -150,26 +153,26 @@ if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
     ((only)) && exit 0
 fi
 
-if ((lm_ord > 0)) && [ ! -f "$lm_pt" ]; then
-    echo "Compiling $lm_ord-gram language model as state dict"
-    $cmd_p prep/arpa-lm-to-state-dict.py \
-        --sos-id -1 --save-sos --on-extra drop -v \
-        "$lm_gz" "${local_sw}/token2id.txt" "$lm_pt" \
-            || (rm -f "$lm_pt" && exit 1)
+# if ((lm_ord > 0)) && [ ! -f "$lm_pt" ]; then
+#     echo "Compiling $lm_ord-gram language model as state dict"
+#     $cmd_p prep/arpa-lm-to-state-dict.py \
+#         --sos-id -1 --save-sos --on-extra drop -v \
+#         "$lm_gz" "${local_sw}/token2id.txt" "$lm_pt" \
+#             || (rm -f "$lm_pt" && exit 1)
     
-    # N.B. If you want to evaluate the LM in terms of perplexity, you can use
-    # the lookup-lm-corpus-perplexity.py script, e.g.
-    #
-    # awk '{NF-=1; print}' "${local_sw}/dev_clean.ref.trn" > dev_clean.txt
-    # prep/lookup-lm-corpus-perplexity.py \
-    #   --states-and-token2id "${lm_pt}" "${local_sw}/token2id" \
-    #   --chunk-size 64 \
-    #   dev_clean.txt
-    #
-    # This is not necessary and, moreover, slow
+#     # N.B. If you want to evaluate the LM in terms of perplexity, you can use
+#     # the lookup-lm-corpus-perplexity.py script, e.g.
+#     #
+#     # awk '{NF-=1; print}' "${local_sw}/dev_clean.ref.trn" > dev_clean.txt
+#     # prep/lookup-lm-corpus-perplexity.py \
+#     #   --states-and-token2id "${lm_pt}" "${local_sw}/token2id" \
+#     #   --chunk-size 64 \
+#     #   dev_clean.txt
+#     #
+#     # This is not necessary and, moreover, slow
 
-    ((only)) && exit 0
-fi
+#     ((only)) && exit 0
+# fi
 
 for x in dev_clean train_clean_100 dev_other test_clean test_other; do
   pdir="$dlf/$x"
@@ -212,10 +215,10 @@ done
 if [ ! -f "$dlf/.complete" ]; then
     echo "Converting into SpectDataSet"
     ln -sf "$(cd "$dl/local"; pwd -P)" "$dlf/../local"
-    # $cmd_p python prep/librispeech.py \
-    #     "$dlf/.." torch_dir sw${vocab_size} $(basename "$dlf") \
-    #         --skip-verify \
-    #         --feats-from $(basename "$dlf") ${TR2TD_ARGS[100]}
+    $cmd_p python prep/librispeech.py \
+        "$dlf/.." torch_dir sw${vocab_size} $(basename "$dlf") \
+            --skip-verify \
+            --feats-from $(basename "$dlf") ${TR2TD_ARGS[100]}
     $cmd_p compute-mvn-stats-for-torch-feat-data-dir \
         --num-workers $nwork \
         "$dlf/train_clean_100/feat" "$dlf/ext/mvn.pt"
@@ -223,6 +226,18 @@ if [ ! -f "$dlf/.complete" ]; then
     touch "$dlf/.complete"
     ((only)) && exit 0
 fi
+
+for x in id2token.txt token2id.txt librispeech-vocab.txt; do
+    if [ ! -f "$bl/$x" ]; then
+        src="$(find "$local_sw" -name "$x" | head -n 1)"
+        if [ ! -f "$src" ]; then
+            echo "Could not find $x in $local_sw"
+            exit 1
+        fi
+        cp "$src" "$bl/"
+        ((only)) && exit 0
+    fi
+done
 
 for x in model data 2kshort-training training; do
     f="$bl/$x.yaml"
@@ -252,7 +267,7 @@ if [ ! -f "$ckpt_2kshort" ]; then
     fi
     state_dir="$bl/states_2kfinal"
     mkdir -p "$state_dir"
-    $cmd $train_script prep/asr_baseline.py \
+    $cmd $train_script prep/asr-baseline.py \
         --read-model-yaml "$bl/model.yaml" \
         --mvn-path "$dlf/ext/mvn.pt" \
         train \
@@ -276,7 +291,7 @@ if [ ! -f "$ckpt_final" ]; then
     fi
     state_dir="$bl/states_final"
     mkdir -p "$state_dir"
-    $cmd $train_script prep/asr_baseline.py \
+    $cmd $train_script prep/asr-baseline.py \
         --read-model-yaml "$bl/model.yaml" \
         --mvn-path "$dlf/ext/mvn.pt" \
         train \
@@ -298,59 +313,108 @@ fi
 
 for x in dev_clean dev_other test_clean test_other; do
     src="$dlf/$x"
-    hyps="$bld/$x/$dname"
-    if [ ! -f "$hyps/.complete" ]; then
-        mkdir -p "$hyps"
-        echo "Decoding $x"
-        $cmd_p prep/asr_baseline.py \
+    logits="$bld/$x/logits"
+    if [ ! -f "$logits/.complete" ]; then
+        mkdir -p "$logits"
+        echo "Saving logits for $x"
+        $cmd_p prep/asr-baseline.py \
             --read-model-yaml "$bl/model.yaml" \
             --mvn-path "$dlf/ext/mvn.pt" \
-            decode ${lm_pt:+--lookup-lm-state-dict "$lm_pt"} \
-                --beam-width "$width" \
-                --inverse-beta "$binv" \
+            decode \
                 --read-data-yaml "$bl/data.yaml" \
                 --max-hyp-len 500 \
-                "$ckpt_final" "$src" "$hyps"
-        touch "$hyps/.complete"
+                --write-logits \
+                "$ckpt_final" "$src" "$logits"
+        touch "$logits/.complete"
         ((only)) && exit 0
     fi
 done
 
+if ((lm_ord)); then
+    if [ ! -f "$bld/lm.$lm_ord.gz" ]; then
+        echo "Hard-linking lm into $bld"
+        ln "$lm_gz" "$bld/lm.$lm_ord.gz"
+        ((only)) && exit 1
+    fi
+fi
+
+if [ "$lm_ord" = 0 ]; then
+    AINVS=( 1 )
+else
+    AINVS=( 1 2 3 4 )
+fi
+BETAS=( 0 1 2 3 )
+for ainv in "${AINVS[@]}"; do
+    for beta in "${BETAS[@]}"; do
+        mkdir -p "$blt"
+        tuning="$blt/alpha-inv${ainv}_beta${beta}"
+        if [ ! -f "$tuning.hyp.trn" ]; then
+            echo "Tuning with alpha-inv=$ainv, beta=$beta, and width=$width"
+            cat > "$tuning.args.txt" <<EOF
+--bpe
+--words
+$bl/librispeech-vocab.txt
+--token2id
+$bl/token2id.txt
+--alpha-inv
+$ainv
+--beta
+$beta
+EOF
+            if ((lm_ord)); then
+            cat >> "$tuning.args.txt" <<EOF
+--lm
+$bld/lm.$lm_ord.gz
+EOF
+            fi
+            $cmd_p python prep/logits-to-trn-via-pyctcdecode.py \
+                "@$tuning.args.txt" \
+                --batch-size $nwork \
+                "$bld/dev_clean/logits" "$tuning.hyp.trn_"
+            mv "$tuning.hyp.trn"{_,}
+            ((only)) && exit 0
+        fi
+    done
+done
+
+if [ ! -f "$blt/best.args.txt" ]; then
+    python prep/error-rates-from-trn.py \
+        --suppress-warning \
+        "${local_sw}/dev_clean.ref.wrd.trn" \
+        "$blt/"*.hyp.trn > "$blt/scores.txt"
+    best="$(grep -Po $'(?<=best hyp \').+(?=\\.hyp\\.trn)' "$blt/scores.txt").args.txt"
+    if [ ! -f "$best" ]; then
+        echo "Failed to find best tuned args"
+        exit 1
+    fi
+    cp "$best" "$blt/best.args.txt"
+    ((only)) && exit 1
+fi
+
 for x in dev_clean dev_other test_clean test_other; do
-    hyps="$bld/$x/$dname"
-    sw_trn="$bld/$x.hyp.sw${vocab_size}.$dname.trn"
-    wrd_trn="$bld/$x.hyp.wrd.$dname.trn"
-    if [ ! -f "$sw_trn" ] || [ ! -f "$wrd_trn" ]; then
+    trn="$bld/$x/$dname.hyp.trn"
+    if [ ! -f "$trn" ]; then
         echo "Creating transcriptions for $x"
-        $cmd_p torch-token-data-dir-to-trn \
-            --num-workers $nwork \
-            "$hyps" "$dlf/ext/id2token.txt" \
-            "$sw_trn"
-        $cmd_p prep/subword2word.py "$sw_trn" "$wrd_trn"
-        $clean && find "$hyps/" -name 'lbi-*.pt' -delete
+        $cmd_p python prep/logits-to-trn-via-pyctcdecode.py \
+            "@$blt/best.args.txt" \
+            --batch-size $nwork \
+            "$bld/$x/logits" "$trn"_
+        mv "$trn"{_,}
         ((only)) && exit 1
     fi
 done
 
-if $clean; then
-    rm -rf "$bl/states_"*
-    for x in "$dlf" "$bld"; do
-        find "$x/" -name 'lbi-*.pt' -delete
-    done
-fi
+# if $clean; then
+#     rm -rf "$bl/states_"*
+#     for x in "$dlf" "$bld"; do
+#         find "$x/" -name 'lbi-*.pt' -delete
+#     done
+# fi
 
 echo "-----------------------------------------------"
-echo "Subword error rates with vocab size $vocab_size"
-for x in dev_clean dev_other test_clean test_other; do
-    prep/error-rates-from-trn.py --suppress-warning \
-        "${local_sw}/$x.ref.sw${vocab_size}.trn" \
-        "$bld/$x.hyp.sw${vocab_size}."*.trn
-done
-
-echo ""
 echo "Word error rates"
 for x in dev_clean dev_other test_clean test_other; do
     prep/error-rates-from-trn.py --suppress-warning \
         "${local_sw}/$x.ref.wrd.trn" \
-        "$bld/$x.hyp.wrd."*.trn
+        "$bld/$x/"*.hyp.trn
 done

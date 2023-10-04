@@ -46,9 +46,7 @@ Options
          max order (default: $lm_ord; ./scripts/baseline_run.sh only)
  -$VCB_FLG      The subword vocabulary size (default: $vocab_size;
          ./scripts/baseline_run.sh only)
- -$WID_FLG      Beam width for decoding. 0 is greedy (default: $width;
-         ./scripts/baseline_run.sh only)
- -$BET_FLG      Inverse beta (mixing coefficient) for decoding (default: $binv;
+ -$WID_FLG      Beam width for decoding (default: $width;
          ./scripts/baseline_run.sh only)
 
 *-$MDL_FLG accepts models not in the list (i.e. not in conf/model.*.yaml or
@@ -164,8 +162,7 @@ stask=pr
 clean=false
 lm_ord=0
 vocab_size=2000
-width=8
-binv=2
+width=32
 
 while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:${ORD_FLG}:${VCB_FLG}:${WID_FLG}:${BNV_FLG}:" opt; do
     case $opt in
@@ -230,12 +227,8 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${M
             vocab_size="$OPTARG"
             ;;
         ${WID_FLG})
-            argcheck_is_nnint $opt "$OPTARG"
-            width="$OPTARG"
-            ;;
-        ${BNV_FLG})
             argcheck_is_nat $opt "$OPTARG"
-            binv="$OPTARG"
+            width="$OPTARG"
             ;;
         ?)
             echo "-$OPTARG is not an option"

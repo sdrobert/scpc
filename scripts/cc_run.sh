@@ -4,7 +4,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --nodes=1
 #SBATCH --mem-per-cpu=1G
-#SBATCH --array=1-100%1
+#SBATCH --array=1-40%1
 #SBATCH --output=exp/slurm_logs/slurm-%A.out
 
 # we don't rely on pytorch-lightning to requeue b/c CC doesn't allow requeuing
