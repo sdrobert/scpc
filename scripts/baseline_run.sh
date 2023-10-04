@@ -142,7 +142,7 @@ if ((lm_ord > 0)) && [ ! -f "$lm_gz" ]; then
             exit 1
         fi
     fi
-    $cmd_p $lm_cmd $prunes -o $lm_ord < "$tdata" |
+    $lm_cmd $prunes -o $lm_ord < "$tdata" |
         gzip -c > "${lm_gz}_" 
     if [ $(gunzip -c "${lm_gz}_" 2> /dev/null | head -n 1 | wc -l) != 1 ]; then
         echo "n-gram lm creation failed!"
