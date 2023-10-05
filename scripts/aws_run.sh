@@ -322,7 +322,7 @@ user_data_raw="$(
       gsub("<IS_LEAF>", leaf);
       gsub("<BUCKET_NAME>", bucket);
       print}' \
-    conf/aws-user-data.template.yaml
+    conf/aws-user-data.template.mime
   )"
 user_data="$(echo "$user_data_raw" | base64 -w0)"
 
