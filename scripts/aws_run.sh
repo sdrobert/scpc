@@ -30,8 +30,14 @@ usage () {
     if ((ret == 0)); then
         cat << EOF 1>&2
 E.g.: $0 -G 1 -- -m cpc.small -v 1
+      (runs ./run.sh on instance with one GPU, training cpc.small/version_1)
+      $0 -LR ./scripts/zrc_run.sh -- -m cpc.small -v 1
+      (runs ./scripts/zrc_run.sh on a CPU-only instance in leaf mode, scoring
+       the aforementioned model)
 
-Compatiblility layer for issuing AWS spot fleet requests.
+Compatiblility layer for issuing AWS spot fleet requests. Spawns a spot fleet
+with a single instance which runs some other script (see -$RUN_FLG)
+to completion, storing results in an EBS volume (default) and/or an S3 bucket.
 
 Options
  -$HLP_FLG      Display this message and exit
@@ -52,7 +58,7 @@ Options
 
   aws_private/aws_vars.sh
 
- which is sourced at the start of this script
+ which is sourced at the start of this script.
   
  Parentheses indicate their value, with XXX indicating a value has been set
  (possibly through aws_vars.sh) but is potentially sensitive.
@@ -132,6 +138,10 @@ Leaf mode
  SNAPSHOT_ID environment variable, make sure it points to a snapshot after
  these pre-processing steps.
 
+See Also
+ ./scripts/aws_init.sh
+  An example of how to configure EC2, S3, etc. to get this script running in
+  the first place
 EOF
     fi
     exit "${1:-1}"
@@ -312,7 +322,7 @@ user_data_raw="$(
       gsub("<IS_LEAF>", leaf);
       gsub("<BUCKET_NAME>", bucket);
       print}' \
-    scripts/aws_run_internal.template.sh
+    conf/aws-user-data.template.yaml
   )"
 user_data="$(echo "$user_data_raw" | base64 -w0)"
 

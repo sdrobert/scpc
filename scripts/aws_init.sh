@@ -1,15 +1,33 @@
 #! /usr/bin/env bash
 
-exit 0
-# the below aren't meant to be run exactly as-is. I didn't run them this way.
-# However, it should give you a good idea of what to do. Copy and paste what
-# you will. Permissions could be tightened.
-# Basic idea
+# Copyright 2023 Sean Robertson
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This script provides an example setup for ./scripts/aws_run.sh. Run with the
+# -h flag for details on how to work with AWS.
+#
+# The below aren't meant to be run exactly as-is (hence the exit). I didn't run
+# them this way. However, it should give you a good idea of what to do. Copy
+# and paste what you will. Permissions could be tightened.
 #
 # Tutorials scavenged:
 # - https://aws.amazon.com/blogs/machine-learning/train-deep-learning-models-on-gpus-using-amazon-ec2-spot-instances/
+# - https://repost.aws/knowledge-center/execute-user-data-ec2
 
-# stores the following constants:
+exit 0
+
+# stores (at least) the following constants:
 # - KEY_NAME (the name of the ssh key you created via console or whatever)
 # - AWS_REGION (the region in which you want everything to run)
 # - BUCKET_NAME (OPTIONAL: name of the s3 bucket to store/load results n' stuff from)
@@ -49,13 +67,14 @@ aws ec2 authorize-security-group-ingress \
     --cidr 0.0.0.0/0 \
     --region "$AWS_REGION"
 
+# create S3 bucket to store exp/ folder (can be synced with ./scripts/aws_sync.sh)
 aws s3api create-bucket \
     --bucket "$BUCKET_NAME" \
     --region "$AWS_REGION" \
     --object-ownership BucketOwnerEnforced \
     --create-bucket-configuration "LocationConstraint=${AWS_REGION}"
 
-# create the volume
+# create the ground truth volume
 aws ec2 create-volume --size $VOL_SIZE --region $AWS_REGION --availability-zone "${AWS_ZONES%%,*}" --volume-type gp2 --tag-specifications "ResourceType=volume,Tags=[{Key=Name,Value=${VOLUME_TAG}}]"
 
 # create the role for the spot instance

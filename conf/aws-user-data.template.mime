@@ -1,18 +1,23 @@
-#!/bin/bash
+Content-Type: multipart/mixed; boundary="//"
+MIME-Version: 1.0
 
-# Copyright 2023 Sean Robertson
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+--//
+Content-Type: text/cloud-config; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="cloud-config.txt"
+
+#cloud-config
+cloud_final_modules:
+- [scripts-user, always]
+
+--//
+Content-Type: text/x-shellscript; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="userdata.txt"
+
+#!/bin/bash
 
 # WARNING! This script is called on the start up of a spot-fleet instance.
 # Do not try to call it directly
@@ -61,24 +66,6 @@ do_cleanup() {
         exit $rv
     fi
 }
-
-# if $IS_LEAF; then
-#     echo "Tagging leaf volume"
-#     leaf_volume="$(aws ec2 describe-volumes --region $AWS_REGION --filter "Name=attachment.instance-id,Values=$INSTANCE_ID" --filter "Name=attachment.device,Values=/dev/sdf" --query 'Volumes[].Attachments[].VolumeId' --output text || true)"
-#     if [ -z "$leaf_volume" ]; then
-#         echo "Could not determine leaf volume!"
-#         do_cleanup 1
-#     fi
-#     mods=""
-#     $IS_DIRTY && mods="dirty"
-#     $IS_LEAF && mods="${mods:+$mods, }leaf"
-#     $DO_TENSORBOARD && mods="${mods:+$mods, }tensorboard"
-#     name="scpc${mods:+ ($mods)}: ${RUN_SH} ${RUN_ARGS[*]}"
-#     aws ec2 create-tags \
-#         --region $AWS_REGION \
-#         --resources "$leaf_volume" \
-#         --tags "Key=Name,Value='$name'" || do_cleanup
-# fi
 
 if ! test -e /dev/sdf; then
     if $IS_LEAF; then
@@ -156,8 +143,6 @@ else
     sudo mkfs -t xfs /dev/sdf || do_cleanup
 fi
 
-
-
 mkdir -p /scpc-ebs || do_cleanup
 
 if ! mount | grep -q /dev/sdf; then
@@ -222,3 +207,5 @@ fi
 echo "Running with args ${RUN_ARGS[*]}"
 $RUN_SH -zx "--quiet" "${RUN_ARGS[@]}"
 do_cleanup
+
+--//--
