@@ -9,7 +9,7 @@ set -eo pipefail
 usage () {
     local ret="${1:-1}"
     echo -e "Usage: $0 [-${HLP_FLG}] [-${OLY_FLG}] [-${SRN_FLG}]" \
-        "[-$CLN_FLG] [-$DAT_FLG DIR]" \
+        "[-$CLN_FLG] [-$DPC_FLG] [-$DAT_FLG DIR]" \
         "[-$EXP_FLG DIR] [-$VER_FLG I] [-$PRC_FLG N]"\
         "[-$WRK_FLG N] [-$LIB_FLG DIR] [-$XTR_FLG ARGS]"\
         "[-$PCA_FLG $(print_arg_choices "${!PCAS[@]}")]"\
@@ -48,6 +48,10 @@ Options
          ./scripts/baseline_run.sh only)
  -$WID_FLG      Beam width for decoding (default: $width;
          ./scripts/baseline_run.sh only)
+ -$DPC_FLG      Same as -$CLN_FLG except, if the final step of the script is
+         completed, also deletes the logits generated during decoding. Decoding
+         with other beam widths, language models, etc. will no longer be
+         possible (./scripts/baseline_run.sh only)
 
 *-$MDL_FLG accepts models not in the list (i.e. not in conf/model.*.yaml or
 not valid) if the model/version pair already exists in the experiment directory
@@ -58,6 +62,7 @@ EOF
 
 # constants
 CLN_FLG=z
+DPC_FLG=Z
 DAT_FLG=d
 EXP_FLG=e
 HLP_FLG=h
@@ -160,11 +165,12 @@ cmd=
 cmd_p=
 stask=pr
 clean=false
+deepclean=false
 lm_ord=0
 vocab_size=2000
 width=32
 
-while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:${ORD_FLG}:${VCB_FLG}:${WID_FLG}:${BNV_FLG}:" opt; do
+while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DPC_FLG}${DAT_FLG}:${EXP_FLG}:${MDL_FLG}:${VER_FLG}:${PRC_FLG}:${WRK_FLG}:${LIB_FLG}:${XTR_FLG}:${PCA_FLG}:${TSK_FLG}:${ORD_FLG}:${VCB_FLG}:${WID_FLG}:${BNV_FLG}:" opt; do
     case $opt in
         ${HLP_FLG})
             usage 0
@@ -178,6 +184,10 @@ while getopts "${HLP_FLG}${OLY_FLG}${SRN_FLG}${CLN_FLG}${DAT_FLG}:${EXP_FLG}:${M
             ;;
         ${CLN_FLG})
             clean=true
+            ;;
+        ${DPC_FLG})
+            clean=true
+            deepclean=true
             ;;
         ${DAT_FLG})
             argcheck_is_writable $opt "$OPTARG"

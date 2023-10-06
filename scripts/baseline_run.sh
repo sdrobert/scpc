@@ -176,10 +176,10 @@ fi
 
 for x in dev_clean train_clean_100 dev_other test_clean test_other; do
   pdir="$dlf/$x"
-  if [ ! -f "$pdir/.a2r_complete" ]; then
-    rm -rf "$tmp" "$pdir/feat"
-    tmp="$em/tmp/$x"
+  if [ ! -f "$pdir/.a2r_complete" ] && [ ! -f "$bl/.deepcleaned" ]; then
+    tmp="$em/tmp"
     echo "Splitting wav.scp into $tmp"
+    rm -rf "$tmp" "$pdir/feat"
     mkdir -p "$tmp" "$pdir/feat"
     wav_num="$(wc -l "${local_sw}/$x.wav.scp"| cut -d ' ' -f 1)"
     lines_per_proc="$(( (wav_num + nproc - 1) / nproc ))"
@@ -212,7 +212,7 @@ for x in dev_clean train_clean_100 dev_other test_clean test_other; do
   fi
 done
 
-if [ ! -f "$dlf/.complete" ]; then
+if [ ! -f "$dlf/.complete" ] && [ ! -f "$bl/.deepcleaned" ]; then
     echo "Converting into SpectDataSet"
     ln -sf "$(cd "$dl/local"; pwd -P)" "$dlf/../local"
     $cmd_p python prep/librispeech.py \
@@ -234,6 +234,7 @@ for x in id2token.txt token2id.txt librispeech-vocab.txt; do
             echo "Could not find $x in $local_sw"
             exit 1
         fi
+        mkdir -p "$bl"
         cp "$src" "$bl/"
         ((only)) && exit 0
     fi
@@ -243,7 +244,6 @@ for x in model data 2kshort-training training; do
     f="$bl/$x.yaml"
     if [ ! -f "$f" ]; then
         echo "Writing $f"
-        mkdir -p "$bl"
         (
             if [ -z "$pca" ]; then
                 export input_size="$(scpc-info $expert_args "$ckpt_pre" | awk '$1 == "output_size" {print $2}')"
@@ -305,6 +305,7 @@ if [ ! -f "$ckpt_final" ]; then
     if $clean; then
         rm -rf "$state_dir"
         for x in "$dlf/train_"*; do
+            # training data reps are no longer needed
             find "$x" -name 'lbi-*.pt' -delete
         done
     fi
@@ -314,7 +315,7 @@ fi
 for x in dev_clean dev_other test_clean test_other; do
     src="$dlf/$x"
     logits="$bld/$x/logits"
-    if [ ! -f "$logits/.complete" ]; then
+    if [ ! -f "$logits/.complete" ] && [ ! -f "$bl/.deepcleaned" ]; then
         mkdir -p "$logits"
         echo "Saving logits for $x"
         $cmd_p prep/asr-baseline.py \
@@ -326,6 +327,10 @@ for x in dev_clean dev_other test_clean test_other; do
                 --write-logits \
                 "$ckpt_final" "$src" "$logits"
         touch "$logits/.complete"
+        if $clean; then
+            # partition's reps are no longer needed
+            find "$src" -name 'lbi-*.pt' -delete
+        fi
         ((only)) && exit 0
     fi
 done
@@ -404,12 +409,21 @@ for x in dev_clean dev_other test_clean test_other; do
     fi
 done
 
-# if $clean; then
-#     rm -rf "$bl/states_"*
-#     for x in "$dlf" "$bld"; do
-#         find "$x/" -name 'lbi-*.pt' -delete
-#     done
-# fi
+if $clean; then
+    rm -rf "$bl/states_"*
+    if ! $deepclean; then
+        for x in "$dlf/"{dev_clean,dev_other,test_clean,test_other,train_*} ; do
+            find "$x/" -name 'lbi-*.pt' -delete
+        done
+    fi
+fi
+
+if $deepclean; then
+    touch "$bl/.deepcleaned"
+    rm -rf "$dlf"  # remove the entire rep folder
+    find "$bld" \
+        -mindepth 2 -maxdepth 2 -name 'logits' -type d -exec rm -rf {} \;
+fi
 
 echo "-----------------------------------------------"
 echo "Word error rates"
