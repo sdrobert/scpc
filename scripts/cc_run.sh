@@ -33,7 +33,7 @@ if [ -f "$1" ]; then
   shift
 fi
 
-export PYTORCH_CUDA_ALLOC_CONF='max_split_size_mb:512'
+# export PYTORCH_CUDA_ALLOC_CONF='max_split_size_mb:512'
 "$script" -zs -p "$P" -w "$W" -x "--quiet" "$@"
 r=$?
 sleep 5

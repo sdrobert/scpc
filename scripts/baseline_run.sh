@@ -264,6 +264,7 @@ if [ ! -f "$ckpt_2kshort" ]; then
         xtra_args_="--distributed-backend nccl $xtra_args"
     else
         train_script=""
+        xtra_args_="$xtra_args"
     fi
     state_dir="$bl/states_2kfinal"
     mkdir -p "$state_dir"
@@ -287,6 +288,7 @@ if [ ! -f "$ckpt_final" ]; then
         train_script="torchrun --standalone --nproc_per_node=$nproc"
         xtra_args_="--distributed-backend nccl $xtra_args"
     else
+        xtra_args_="$xtra_args"
         train_script=""
     fi
     state_dir="$bl/states_final"
