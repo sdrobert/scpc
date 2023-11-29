@@ -48,7 +48,7 @@ register_serializer("reckless_json")
 
 
 def collate_data(
-    results_from: Literal["zrc", "tb"] = "zrc",
+    results_from: Literal["zrc", "tb", "asr_training"] = "zrc",
     exp_dir: str = "../exp",
     model_blacklist: Sequence[str] = MODEL_BLACKLIST,
     collapse_distributed: bool = True,
@@ -85,8 +85,8 @@ def collate_data(
                         datum = dict(id=id, zrc=row)
                         res_data.append(datum)
         elif results_from == "tb":
-            for event_path in exp_dir.glob(f'tb_logs/{datum["name"]}/events.*'):
-                ea = EventAccumulator(str(event_path))
+            for event_pth in exp_dir.glob(f'tb_logs/{datum["name"]}/events.*'):
+                ea = EventAccumulator(str(event_pth))
                 ea.Reload()
                 if ({"epoch", "val_loss"} - set(ea.Tags()["scalars"])) != set():
                     continue
@@ -101,6 +101,25 @@ def collate_data(
                         ),
                     )
                     res_data.append(datum)
+        elif results_from == "asr_training":
+            for training_pth in pth.parent.glob(f"baseline/full_v2000/*training.csv"):
+                style = "full" if training_pth.name == "training.csv" else "short"
+                with training_pth.open(newline="") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        for x in (
+                            "epoch",
+                            "es_resume_cd",
+                            "es_patience_cd",
+                            "rlr_resume_cd",
+                            "rlr_patience_cd",
+                        ):
+                            row[x] = int(row[x])
+                        for x in ("lr", "train_met", "val_met"):
+                            row[x] = float(row[x])
+                        row["style"] = style
+                        datum = dict(id=id, asr_training=row)
+                        res_data.append(datum)
         else:
             raise NotImplementedError
 
@@ -151,7 +170,7 @@ def collate_data(
             regex=f"^training\\.{loss_type.replace('-', '_')}_loss"
         ).columns
         df.loc[loss_ne_idx, loss_cols] = pd.NA
-    
+
     # fill max_chunks with zeros whenever the chunking policy is none
     no_chunking_idx = df["training.chunking.policy"] == "none"
     df.loc[no_chunking_idx, "training.chunking.max_chunks"] = 0
@@ -211,7 +230,9 @@ A = TypeVar("A")
 
 
 def _filter_preamble(
-    df: pd.DataFrame, args: Sequence[Dict[str, A]], kwargs: Dict[str, A],
+    df: pd.DataFrame,
+    args: Sequence[Dict[str, A]],
+    kwargs: Dict[str, A],
 ) -> Dict[str, A]:
     if len(args) > 1 or (len(args) == 1) == (len(kwargs) > 0):
         raise ValueError("Either pass dict or keyword args")
