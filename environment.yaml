@@ -52,6 +52,7 @@ dependencies:
   - zerospeech-tde
   - expiringdict
   - sortedcontainers
+  - huggingface_hub
   - pip:  # FIXME(sdrobert): Update to conda dep when pydrobert-pytorch and pydrobert-speech release >0.3.0
     - "git+https://github.com/sdrobert/pydrobert-pytorch"
     - "git+https://github.com/sdrobert/pydrobert-speech"

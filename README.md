@@ -1,6 +1,11 @@
 # scpc
 
-Package and experiments for pre-training (mostly) CPC speech representations.
+This is the official repository of the paper [Bigger is not Always Better: The
+Effect of Context Size on Speech
+Pre-Training](https://arxiv.org/abs/2312.01515). The repo contains the source
+for all experiments from the paper, training, and inference. All artifacts,
+including model checkpoints, are currently stored in the HuggingFace repo
+[sdrobert/scpc-exp](https://huggingface.co/sdrobert/scpc-exp).
 
 ## For inference
 
@@ -25,6 +30,9 @@ necessary to pass at least a JSON file for configuring the feature frontend.
 The relevant arguments should be stored in a file called `feats.args.txt` in
 the same folder as `<ckpt>`.
 
+As mentioned, the pre-trained models we made are stored in a HuggingFace repo.
+They may be downloaded individually via the `huggingface_hub` package 
+
 Information about the pre-trained model, including the number of parameters,
 downsampling factor, and so on, may be determined via the command
 
@@ -32,9 +40,9 @@ downsampling factor, and so on, may be determined via the command
 scpc-info <feat-args> <ckpt> [<out-file>]
 ```
 
-## For training
+## For pre-training
 
-Training involves a few more dependencies, which can be installed via the
+Pre-training involves a few more dependencies, which can be installed via the
 command
 
 ``` sh
@@ -107,8 +115,9 @@ conf/fbank-80-feats.json
 Rather than run a series of the bare commands above, our experimentation, much
 like [kaldi](https://kaldi-asr.org/), organizes experiments _viz_ BASH recipe
 scripts. There are recipes for training ([run.sh](./run.sh)), ZeroSpeech
-([zrc_run.sh](./scripts/zrc_run.sh)), and SUPERB
-([superb_run.sh](./scripts/superb_run.sh)).
+ABX-LS ([zrc_run.sh](./scripts/zrc_run.sh)), SUPERB
+([superb_run.sh](./scripts/superb_run.sh)), and our own ASR benchmark
+[baseline_run.sh](./scripts/baseline_run.sh).
 
 To get started with the recipes, clone this repo, then run the following
 (assuming [conda](https://conda.org/) has already been installed):
@@ -150,11 +159,18 @@ have no notion of versioning: updating the feature frontend will result in a
 mismatch between past and future training/inference. If a new configuration is
 desired, it's best to name that configuration something else.
 
+The HuggingFace repo stores the contents of the `exp/` folder over the course
+of our experimentation. You may download all such files by cloning the repo:
+
+``` sh
+git clone https://huggingface.co/sdrobert/scpc-exp exp
+```
+
 To learn how to configure different models, training partitions, and so on,
 run
 
 ``` sh
-./run.sh -h
+./run.sh -h  # or some other run script
 ```
 
 ## License
