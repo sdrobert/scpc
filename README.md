@@ -1,11 +1,8 @@
 # scpc
 
-This is the official repository of the paper [Bigger is not Always Better: The
-Effect of Context Size on Speech
-Pre-Training](https://arxiv.org/abs/2312.01515). The repo contains the source
+This is the official repository of the paper Bigger is not Always Better: The Effect of Context Size on Speech Pre-Training. The repo contains the source
 for all experiments from the paper, training, and inference. All artifacts,
-including model checkpoints, are currently stored in the HuggingFace repo
-[sdrobert/scpc-exp](https://huggingface.co/sdrobert/scpc-exp).
+including model checkpoints, are stored elsewhere, to be included upon submission.
 
 ## For inference
 
@@ -77,39 +74,6 @@ on the directories containing the wav files, using the flag `--numpy` to save
 representations as Numpy arrays, and set the destination to the submission
 directory. Then continue with scoring.
 
-## For SUPERB
-
-To run the [SUPERB](https://superbbenchmark.org/) benchmark, install our
-[fork](https://github.com/sdrobert/s3prl/tree/scpc) of
-[S3PRL](https://s3prl.github.io/s3prl/):
-
-``` sh
-pip install git+https://github.com/sdrobert/s3prl.git@scpc
-```
-
-This version contains the SCPC upstream. _Note:_ you do not need to install the
-scpc package to run s3prl as the relevant code from scpc has been copied over
-from the former.
-
-Following the [SUPERB
-instructions](https://github.com/s3prl/s3prl/blob/main/s3prl/downstream/docs/superb.md),
-the relevant options/arguments to pass to `run_downstream.py` are
-
-``` sh
-run_downstream.py \
-  -u scpc_local \
-  -k <ckpt> \
-  -g <expert-config>
-```
-
-where `<expert-config>` is a path to a file containing `<feat-args>`, one
-field per line, e.g.
-
-``` sh
---computer-json
-conf/fbank-80-feats.json
-```
-
 ## Running the recipes
 
 Rather than run a series of the bare commands above, our experimentation, much
@@ -163,7 +127,7 @@ The HuggingFace repo stores the contents of the `exp/` folder over the course
 of our experimentation. You may download all such files by cloning the repo:
 
 ``` sh
-git clone https://huggingface.co/sdrobert/scpc-exp exp
+redacted for anonymity
 ```
 
 To learn how to configure different models, training partitions, and so on,
