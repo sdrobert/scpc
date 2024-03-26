@@ -27,6 +27,9 @@ source scripts/cc_env.sh
 P="${SLURM_NTASKS:-1}"
 W="${SLURM_CPUS_PER_TASK:-4}"
 
+# some nodes are buggy and will fail these tests. Don't use em.
+pytest tests
+
 script="./run.sh"
 if [ -f "$1" ]; then
   script="$1"

@@ -178,7 +178,9 @@ class BestRqLossParams(param.Parameterized):
         8192, bounds=(1, None), doc="Number of quantized vectors in codebook"
     )
     codebook_dim: int = param.Integer(
-        16, bounds=(1, None), doc="Size of quantized vector in codebook",
+        16,
+        bounds=(1, None),
+        doc="Size of quantized vector in codebook",
     )
     num_speakers: Optional[int] = param.Integer(
         None,
@@ -752,7 +754,9 @@ class LightningPretrainedFrontend(pl.LightningModule):
         if self.params.training.loss_type == "cpc":
             loss = self.cpc_loss(latent, context, lens, speakers)
         elif self.params.training.loss_type == "best-rq":
-            loss = self.best_rq_loss(feats, context, lens, speakers)
+            loss = self.best_rq_loss(
+                feats, (feats == feats_).all(2), context, lens, speakers
+            )
         else:
             raise NotImplementedError
         return loss
@@ -819,7 +823,9 @@ class LightningPretrainedFrontend(pl.LightningModule):
         return feats, None, None, feat_sizes, None, utt_ids
 
     def forward(
-        self, feats: torch.Tensor, feat_lens: Optional[torch.Tensor] = None,
+        self,
+        feats: torch.Tensor,
+        feat_lens: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         return self.get_inference_model().forward(feats, feat_lens)
 
@@ -854,7 +860,11 @@ class LightningPretrainedFrontend(pl.LightningModule):
             )
 
         grp = pargparse.add_deserialization_group_to_parser(
-            parser, params, "params", reckless=True, flag_format_str=read_format_str,
+            parser,
+            params,
+            "params",
+            reckless=True,
+            flag_format_str=read_format_str,
         )
         return grp
 
@@ -894,7 +904,10 @@ def main(args: Optional[Sequence[str]] = None):
         "--num-workers", type=int, default=None, help="Number of workers in datasets"
     )
     parser.add_argument(
-        "--quiet", action="store_true", default=False, help="Suppress progress bar",
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress progress bar",
     )
     parser.add_argument(
         "--root-dir",

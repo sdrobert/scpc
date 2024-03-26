@@ -708,7 +708,8 @@ class SelfAttentionEncoder(Encoder, json_name="sa"):
         self, x: torch.Tensor, lens: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         mask = self.get_mask(x, lens)
-        x = self.ff(self.encoder(x, mask))
+        x = self.encoder(x, mask)
+        x = self.ff(x)
         return x, lens
 
 
@@ -1120,12 +1121,14 @@ class BestRqLossNetwork(torch.nn.Module, Generic[E]):
     def forward(
         self,
         feats: torch.Tensor,
+        mask: torch.Tensor,
         context: torch.Tensor,
         lens: Optional[torch.Tensor] = None,
         sources: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         assert feats.ndim == context.ndim == 3
-        assert feats.size(0) == context.size(0)
+        assert mask.ndim == 2
+        assert feats.size(0) == context.size(0) == mask.size(0)
 
         # we compute context first just in case the prediction encoder downsamples
         if self.embed is not None:
@@ -1139,6 +1142,7 @@ class BestRqLossNetwork(torch.nn.Module, Generic[E]):
         with torch.no_grad():
             feats = feats.reshape(N, T, -1)  # in case we've downsampled
             feats = feats[:, self.offset :]
+            mask = mask.reshape(N, T, -1)[:, self.offset :].all(2)
             assert feats.size(2) == self.proj_matrix.size(0)
             feats = torch.nn.functional.normalize(feats @ self.proj_matrix, dim=2)
             norms = torch.linalg.vector_norm(feats.unsqueeze(2) - self.codebook, dim=3)
@@ -1146,9 +1150,8 @@ class BestRqLossNetwork(torch.nn.Module, Generic[E]):
             del feats, norms
             assert targets.shape == (N, T - self.offset)
             if lens is not None:
-                mask = get_length_mask(targets, lens - self.offset)
-                targets = targets.masked_fill_(~mask, self.loss.ignore_index)
-                del mask
+                mask = mask & get_length_mask(targets, lens - self.offset)
+            targets = targets.masked_fill_(~mask, self.loss.ignore_index)
             targets = targets.flatten()
 
         logits = logits[:, self.offset :].flatten(0, 1)

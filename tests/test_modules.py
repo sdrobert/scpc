@@ -244,34 +244,38 @@ def test_contiguous_temporal_mask():
 @pytest.mark.parametrize("num_speakers", [None, 5], ids=["nospkrs", "spkrs"])
 def test_best_rq_loss_network_matches_manual_comp(offset, num_speakers):
     torch.manual_seed(5)
-    N, T, F, C, offset = 100, 30, 5, 8, 0
+    N, T, W, F, C, offset = 100, 30, 5, 5, 8, 0
     assert T % 2 == 0
     ff = FeedForwardEncoder(C)
     feats = torch.randn(N, T, F)
+    mask = torch.randint(0, 2, (N, T)).bool()
     lens = torch.randint(1, T // 2 + 1, (N,))
     context = torch.randn(N, T // 2, C)
     sources = torch.randint(1 if num_speakers is None else num_speakers, (N,))
     best_rq = BestRqLossNetwork(2 * F, ff, num_speakers=num_speakers, offset=offset)
     loss_exp = 0.0
+    denom = 0
     for n in range(N):
-        feats_n, lens_n, context_n = feats[n], lens[n], context[n]
-        feats_n = feats_n.view(T // 2, 2 * F)
+        feats_n, mask_n, lens_n, context_n = feats[n], mask[n], lens[n], context[n]
+        feats_n, mask_n = feats_n.view(T // 2, 2 * F), mask_n.view(T // 2, 2).all(1)
         feats_n = torch.nn.functional.normalize(feats_n @ best_rq.proj_matrix)
         if num_speakers:
             context_n = context_n + best_rq.embed(sources[n : n + 1])
         logp_n = torch.nn.functional.log_softmax(ff(context_n)[0], 1)
         lens_n = lens_n.item()
         for t in range(offset, lens_n):
-            feats_nt = feats_n[t]
-            target_nt_idx, target_nt_norm = -1, float("inf")
-            for c in range(C):
-                codebook_c = best_rq.codebook[c]
-                target_c_norm = torch.linalg.vector_norm(feats_nt - codebook_c)
-                if target_c_norm < target_nt_norm:
-                    target_nt_idx, target_nt_norm = c, target_c_norm
-            loss_exp = loss_exp - logp_n[t, target_nt_idx]
-    loss_exp = loss_exp / (lens - offset).clamp_min_(0).sum().item()
-    loss_act = best_rq(feats, context, lens, sources)
+            feats_nt, mask_nt = feats_n[t], mask_n[t]
+            if mask_nt.item():
+                denom += 1
+                target_nt_idx, target_nt_norm = -1, float("inf")
+                for c in range(C):
+                    codebook_c = best_rq.codebook[c]
+                    target_c_norm = torch.linalg.vector_norm(feats_nt - codebook_c)
+                    if target_c_norm < target_nt_norm:
+                        target_nt_idx, target_nt_norm = c, target_c_norm
+                loss_exp = loss_exp - logp_n[t, target_nt_idx]
+    loss_exp = loss_exp / denom
+    loss_act = best_rq(feats, mask, context, lens, sources)
     assert torch.isclose(loss_exp, loss_act)
 
 
