@@ -341,7 +341,7 @@ if ((lm_ord)); then
     if [ ! -f "$bld/lm.$lm_ord.gz" ]; then
         echo "Hard-linking lm into $bld"
         ln "$lm_gz" "$bld/lm.$lm_ord.gz"
-        ((only)) && exit 1
+        ((only)) && exit 0
     fi
 fi
 
@@ -395,7 +395,7 @@ if [ ! -f "$blt/best.args.txt" ]; then
         exit 1
     fi
     cp "$best" "$blt/best.args.txt"
-    ((only)) && exit 1
+    ((only)) && exit 0
 fi
 
 for x in dev_clean dev_other test_clean test_other; do
@@ -407,7 +407,7 @@ for x in dev_clean dev_other test_clean test_other; do
             --batch-size $nwork \
             "$bld/$x/logits" "$trn"_
         mv "$trn"{_,}
-        ((only)) && exit 1
+        ((only)) && exit 0
     fi
 done
 
@@ -420,6 +420,18 @@ if $clean; then
     fi
 fi
 
+for x in dev_clean dev_other test_clean test_other; do
+    trn="$bld/$x/$dname.hyp.trn"
+    score="$bld/$x/$dname.wer.txt"
+    if [ ! -f "$score" ]; then
+        prep/error-rates-from-trn.py --suppress-warning \
+            "${local_sw}/$x.ref.wrd.trn" \
+            "$bld/$x/$dname.hyp.trn" | grep '^hyp ' > "$score"
+        ((only)) && exit 0
+    fi
+done
+
+
 if $deepclean; then
     touch "$bl/.deepcleaned"
     rm -rf "$dlf"  # remove the entire rep folder
@@ -430,7 +442,6 @@ fi
 echo "-----------------------------------------------"
 echo "Word error rates"
 for x in dev_clean dev_other test_clean test_other; do
-    prep/error-rates-from-trn.py --suppress-warning \
-        "${local_sw}/$x.ref.wrd.trn" \
-        "$bld/$x/"*.hyp.trn
+    echo "$x"
+    cat "$bld/$x/"*.wer.txt
 done
